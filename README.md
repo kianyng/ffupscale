@@ -18,6 +18,7 @@ ffupscale is a native windows application made for easily upscaling videos with 
 * Encoding presets
 * Quality presets
 * Output location
+* Target file size
 
 ## Dependencies
 
