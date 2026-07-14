@@ -1,9 +1,9 @@
-# FFmpeg-Video-Upscaler
+# ffupscale
 #### A simple video upscaler using FFmpeg - for people who don't want to mess about with commands.
 
 FFmpeg upscaling requires using cmd/terminal or a .bat file, which can be very complicated for some people, or even just a massive pain.
 
-Video Upscaler is a native windows application made for easily upscaling videos with customisable settings and drag and drop capability, so you dont have to mess about with commands.
+ffupscale is a native windows application made for easily upscaling videos with customisable settings and drag and drop capability, so you dont have to mess about with commands.
 
 ## Upcoming features
 
