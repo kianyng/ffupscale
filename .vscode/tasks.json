@@ -1,0 +1,22 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run PyQt with auto-restart",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m",
+                "watchdog.watchmedo",
+                "auto-restart",
+                "--patterns=*.py",
+                "--recursive",
+                "--",
+                "python",
+                "src/ui.py"
+            ],
+            "problemMatcher": [],
+            "isBackground": true
+        }
+    ]
+}
