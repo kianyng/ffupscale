@@ -2,7 +2,7 @@
 
 * Made basic UI with drag and drop zone and browse button
 * Learning PyQt6
-
+---
 ### To-do next
 
 * Make drag and drop zone clickable to browse

@@ -5,6 +5,10 @@ FFmpeg upscaling requires using cmd/terminal or a .bat file, which can be very c
 
 ffupscale is a native windows application made for easily upscaling videos with customisable settings and drag and drop capability, so you dont have to mess about with commands.
 
+---
+
+### [View progress](progress.md)
+
 ## Upcoming features
 
 * Adjustable output resolution
