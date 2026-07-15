@@ -4,11 +4,12 @@
 * Learning PyQt6
 * Updated UI to include browse and drag and drop functionality
 * Removed separate browse button and integrated it into drop zone
+* Added properties of imported video at the side
 
 ### To-do next
 
 * Add selectors for output quality, resolution and fps
-* Detect properties of selected video (fps, resolution)
+* Add thumbnail in drop box
 
 ### Notes
 

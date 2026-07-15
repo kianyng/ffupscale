@@ -1,16 +1,96 @@
+import json
+import shutil
+import subprocess
 import sys
+
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QFormLayout,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QVBoxLayout,
     QWidget,
 )
+
+
+def read_video_properties(file_path):
+    """Use FFprobe to read properties from the selected video."""
+
+    ffprobe_path = shutil.which("ffprobe")
+
+    if ffprobe_path is None:
+        raise FileNotFoundError(
+            "FFprobe could not be found. Make sure FFmpeg is installed "
+            "and added to PATH."
+        )
+
+    command = [
+        ffprobe_path,
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries",
+        (
+            "stream=width,height,avg_frame_rate,codec_name:"
+            "format=duration,size"
+        ),
+        "-of", "json",
+        file_path,
+    ]
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    data = json.loads(result.stdout)
+
+    if not data.get("streams"):
+        raise ValueError("The selected file does not contain a video stream.")
+
+    video_stream = data["streams"][0]
+    video_format = data["format"]
+
+    frame_rate_fraction = video_stream.get("avg_frame_rate", "0/1")
+    numerator, denominator = frame_rate_fraction.split("/")
+
+    if float(denominator) != 0:
+        frame_rate = float(numerator) / float(denominator)
+    else:
+        frame_rate = 0
+
+    return {
+        "width": video_stream.get("width", 0),
+        "height": video_stream.get("height", 0),
+        "fps": frame_rate,
+        "duration": float(video_format.get("duration", 0)),
+        "codec": video_stream.get("codec_name", "Unknown"),
+        "format": Path(file_path).suffix.removeprefix(".").upper(),
+        "file_size": int(video_format.get("size", 0)),
+    }
+
+
+def format_duration(duration_seconds):
+    """Convert a duration in seconds into hours, minutes and seconds."""
+
+    total_seconds = round(duration_seconds)
+
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+
+    if hours > 0:
+        return f"{hours}:{minutes:02}:{seconds:02}"
+
+    return f"{minutes}:{seconds:02}"
 
 
 class DropArea(QFrame):
@@ -21,11 +101,13 @@ class DropArea(QFrame):
 
         self.setObjectName("dropArea")
         self.setAcceptDrops(True)
-        self.setMinimumHeight(50)
+        self.setMinimumHeight(250)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        
+
         self.label = QLabel("Drag file or click to browse")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # This means the label will not intercept mouse clicks.
         self.label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents
         )
@@ -64,7 +146,10 @@ class DropArea(QFrame):
             self,
             "Select a video",
             "",
-            "Video files (*.mp4 *.mov *.mkv *.avi *.webm);;All files (*.*)",
+            (
+                "Video files (*.mp4 *.mov *.mkv *.avi *.webm);;"
+                "All files (*.*)"
+            ),
         )
 
         if file_path:
@@ -80,6 +165,7 @@ class DropArea(QFrame):
         urls = event.mimeData().urls()
 
         if not urls:
+            event.ignore()
             return
 
         file_path = urls[0].toLocalFile()
@@ -87,6 +173,8 @@ class DropArea(QFrame):
         if Path(file_path).is_file():
             self.select_file(file_path)
             event.acceptProposedAction()
+        else:
+            event.ignore()
 
     def select_file(self, file_path):
         self.label.setText(Path(file_path).name)
@@ -98,28 +186,146 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("ffupscale")
-        self.resize(800, 500)
+        self.resize(900, 500)
 
+        # Application title
         title = QLabel("ffupscale")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("""font-size: 40px; font-weight: bold; color: white;""")
-        
+        title.setStyleSheet("""
+            font-size: 40px;
+            font-weight: bold;
+        """)
+
+        # Drag-and-drop area
         self.drop_area = DropArea()
         self.drop_area.file_selected.connect(self.video_selected)
 
-        layout = QVBoxLayout()
-        layout.setContentsMargins(30, 30, 30, 30)
+        # Property value labels
+        self.resolution_value = QLabel("—")
+        self.fps_value = QLabel("—")
+        self.duration_value = QLabel("—")
+        self.codec_value = QLabel("—")
+        self.format_value = QLabel("—")
+        self.file_size_value = QLabel("—")
 
-        layout.addWidget(title)
-        layout.addWidget(self.drop_area)
+        # Arrange property names and their values
+        properties_layout = QFormLayout()
+        properties_layout.setHorizontalSpacing(20)
+        properties_layout.setVerticalSpacing(15)
+
+        properties_layout.addRow(
+            "Resolution:",
+            self.resolution_value,
+        )
+        properties_layout.addRow(
+            "Frame rate:",
+            self.fps_value,
+        )
+        properties_layout.addRow(
+            "Duration:",
+            self.duration_value,
+        )
+        properties_layout.addRow(
+            "Codec:",
+            self.codec_value,
+        )
+        properties_layout.addRow(
+            "Format:",
+            self.format_value,
+        )
+        properties_layout.addRow(
+            "File size:",
+            self.file_size_value,
+        )
+
+        # Put the drop area and properties beside each other
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(30)
+
+        content_layout.addWidget(
+            self.drop_area,
+            stretch=2,
+        )
+        content_layout.addLayout(
+            properties_layout,
+            stretch=1,
+        )
+
+        # Main window layout
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(30, 20, 30, 30)
+        main_layout.setSpacing(20)
+
+        main_layout.addWidget(title)
+        main_layout.addLayout(content_layout)
 
         central_widget = QWidget()
-        central_widget.setLayout(layout)
+        central_widget.setLayout(main_layout)
 
         self.setCentralWidget(central_widget)
 
     def video_selected(self, file_path):
-        print(f"Selected video: {file_path}")
+        try:
+            properties = read_video_properties(file_path)
+
+            file_size_mb = (
+                properties["file_size"] / (1024 * 1024)
+            )
+
+            self.resolution_value.setText(
+                f"{properties['width']} × {properties['height']}"
+            )
+
+            self.fps_value.setText(
+                f"{properties['fps']:.2f} FPS"
+            )
+
+            self.duration_value.setText(
+                format_duration(properties["duration"])
+            )
+
+            self.codec_value.setText(
+                properties["codec"].upper()
+            )
+
+            self.format_value.setText(
+                properties["format"]
+            )
+
+            self.file_size_value.setText(
+                f"{file_size_mb:.2f} MB"
+            )
+
+            print(f"Selected video: {file_path}")
+            print(properties)
+
+        except FileNotFoundError as error:
+            self.show_error(str(error))
+
+        except subprocess.CalledProcessError as error:
+            message = "FFprobe could not read the selected file."
+
+            if error.stderr:
+                message += f"\n\n{error.stderr}"
+
+            self.show_error(message)
+
+        except (
+            json.JSONDecodeError,
+            KeyError,
+            ValueError,
+            IndexError,
+        ) as error:
+            self.show_error(
+                f"Could not understand the video information:\n{error}"
+            )
+
+    def show_error(self, message):
+        QMessageBox.critical(
+            self,
+            "Could not read video",
+            message,
+        )
 
 
 if __name__ == "__main__":
