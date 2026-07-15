@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QVBoxLayout,
     QWidget,
+    QPushButton
 )
 
 
@@ -275,7 +276,7 @@ class DropArea(QFrame):
             self.display_thumbnail()    
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow): # -- MAIN WINDOW --
     def __init__(self):
         super().__init__()
 
@@ -289,6 +290,9 @@ class MainWindow(QMainWindow):
             font-size: 40px;
             font-weight: bold;
         """)
+
+        button = QPushButton("Continue")
+        button.setStyleSheet("font-size: 15px; font-weight: bold;")
 
         # Drag-and-drop area
         self.drop_area = DropArea()
@@ -357,6 +361,8 @@ class MainWindow(QMainWindow):
         central_widget.setLayout(main_layout)
 
         self.setCentralWidget(central_widget)
+
+        main_layout.addWidget(button)
 
     def video_selected(self, file_path):
         try:
