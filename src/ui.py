@@ -5,7 +5,8 @@ import sys
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPainter, QPainterPath, QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal, QRectF
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -92,7 +93,48 @@ def format_duration(duration_seconds):
 
     return f"{minutes}:{seconds:02}"
 
+def create_video_thumbnail(file_path):
+    ffmpeg_path = shutil.which("ffmpeg")
 
+    if ffmpeg_path is None:
+        raise FileNotFoundError(
+            "FFmpeg could not be found."
+        )
+
+    command = [
+        ffmpeg_path,
+        "-v", "error",
+        "-ss", "1",
+        "-i", file_path,
+        "-frames:v", "1",
+        "-f", "image2pipe",
+        "-vcodec", "png",
+        "pipe:1",
+    ]
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+    )
+
+    if result.returncode != 0 or not result.stdout:
+        ffmpeg_error = result.stderr.decode(
+            errors="replace"
+        )
+
+        raise ValueError(
+            f"FFmpeg could not create a video thumbnail:\n"
+            f"{ffmpeg_error}"
+        )
+
+    thumbnail = QPixmap()
+
+    if not thumbnail.loadFromData(result.stdout):
+        raise ValueError(
+            "The thumbnail image could not be loaded."
+        )
+
+    return thumbnail
 class DropArea(QFrame):
     file_selected = pyqtSignal(str)
 
@@ -107,6 +149,8 @@ class DropArea(QFrame):
         self.label = QLabel("Drag file or click to browse")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        self.thumbnail = None
+
         # This means the label will not intercept mouse clicks.
         self.label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents
@@ -117,8 +161,8 @@ class DropArea(QFrame):
 
         self.setStyleSheet("""
             QFrame#dropArea {
-                border: 3px dashed #999999;
-                border-radius: 12px;
+                border: 2px dashed #999999;
+                border-radius: 20px;
                 background-color: #242424;
             }
 
@@ -177,8 +221,58 @@ class DropArea(QFrame):
             event.ignore()
 
     def select_file(self, file_path):
-        self.label.setText(Path(file_path).name)
+        try:
+            self.thumbnail = create_video_thumbnail(file_path)
+            self.display_thumbnail()
+
+        except (FileNotFoundError, ValueError) as error:
+            self.thumbnail = None
+            self.label.setText(Path(file_path).name)
+            print(f"Could not create thumbnail: {error}")
+
         self.file_selected.emit(file_path)
+
+    def display_thumbnail(self):
+        if self.thumbnail is None:
+            return
+
+        scaled_thumbnail = self.thumbnail.scaled(
+            self.label.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+        rounded_thumbnail = QPixmap(scaled_thumbnail.size())
+        rounded_thumbnail.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(rounded_thumbnail)
+
+        painter.setRenderHint(
+            QPainter.RenderHint.Antialiasing
+        )
+
+        painter.setRenderHint(
+            QPainter.RenderHint.SmoothPixmapTransform
+        )
+
+        clipping_path = QPainterPath()
+        clipping_path.addRoundedRect(
+            QRectF(rounded_thumbnail.rect()),
+            12,
+            12,
+        )
+
+        painter.setClipPath(clipping_path)
+        painter.drawPixmap(0, 0, scaled_thumbnail)
+        painter.end()
+
+        self.label.setPixmap(rounded_thumbnail)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+
+        if self.thumbnail is not None:
+            self.display_thumbnail()    
 
 
 class MainWindow(QMainWindow):
@@ -186,7 +280,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("ffupscale")
-        self.resize(900, 500)
+        self.resize(700, 500)
 
         # Application title
         title = QLabel("ffupscale")

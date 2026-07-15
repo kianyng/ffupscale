@@ -16,7 +16,11 @@
                 "src/ui.py"
             ],
             "problemMatcher": [],
-            "isBackground": true
+            "isBackground": true,
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
         }
     ]
 }
