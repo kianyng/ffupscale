@@ -39,9 +39,9 @@ ffprobe -version
 
 * [Watchdog](https://pypi.org/project/watchdog/) powers the included VS Code auto-restart task.
 
-Python's standard-library modules such as `json`, `pathlib`, `shutil`, `subprocess`, and `sys` are included with Python and do not need separate installation.
+Python's standard library modules such as `json`, `pathlib`, `shutil`, `subprocess`, and `sys` are included with Python and do not need separate installation.
 
-## Installation
+## Installation (full windows exe coming soon)
 
 Clone the repository, open a terminal in its root folder, and install the Python dependencies:
 
