@@ -23,3 +23,6 @@ ffupscale is a native windows application made for easily upscaling videos with 
 ## Dependencies
 
 * [FFmpeg](https://www.ffmpeg.org/)
+**ONLY IF RUNNING THROUGH SOURCE CODE**
+PyQt6
+Python
