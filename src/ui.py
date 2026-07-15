@@ -18,7 +18,8 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QVBoxLayout,
     QWidget,
-    QPushButton
+    QPushButton,
+    QStackedWidget,
 )
 
 
@@ -136,7 +137,7 @@ def create_video_thumbnail(file_path):
         )
 
     return thumbnail
-class DropArea(QFrame):
+class DropArea(QFrame): # -- DROP AREA --
     file_selected = pyqtSignal(str)
 
     def __init__(self):
@@ -281,7 +282,7 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
         super().__init__()
 
         self.setWindowTitle("ffupscale")
-        self.resize(700, 500)
+        self.resize(693, 407)
 
         # Application title
         title = QLabel("ffupscale")
@@ -290,9 +291,6 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             font-size: 40px;
             font-weight: bold;
         """)
-
-        button = QPushButton("Continue")
-        button.setStyleSheet("font-size: 15px; font-weight: bold;")
 
         # Drag-and-drop area
         self.drop_area = DropArea()
@@ -336,7 +334,25 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             self.file_size_value,
         )
 
-        # Put the drop area and properties beside each other
+        # Continue button
+        self.continue_button = QPushButton("Continue")
+        self.continue_button.setEnabled(False)
+
+        self.continue_button.setStyleSheet("""
+            QPushButton {
+                font-size: 15px;
+                font-weight: bold;
+                padding: 8px;
+            }
+        """)
+
+        # Right side: properties followed by Continue button
+        right_layout = QVBoxLayout()
+        right_layout.addLayout(properties_layout)
+        right_layout.addStretch()
+        right_layout.addWidget(self.continue_button)
+
+        # Drop area on the left, information on the right
         content_layout = QHBoxLayout()
         content_layout.setSpacing(30)
 
@@ -344,14 +360,15 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             self.drop_area,
             stretch=2,
         )
+
         content_layout.addLayout(
-            properties_layout,
+            right_layout,
             stretch=1,
         )
 
-        # Main window layout
+        # Complete window layout
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(30, 20, 30, 30)
+        main_layout.setContentsMargins(30,20,30,30,)
         main_layout.setSpacing(20)
 
         main_layout.addWidget(title)
@@ -361,8 +378,6 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
         central_widget.setLayout(main_layout)
 
         self.setCentralWidget(central_widget)
-
-        main_layout.addWidget(button)
 
     def video_selected(self, file_path):
         try:
@@ -398,6 +413,9 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
             print(f"Selected video: {file_path}")
             print(properties)
+            
+            self.continue_button.setEnabled(True)
+            self.continue_button.setStyleSheet("""QPushButton {font-size: 15px;font-weight: bold;padding: 8px;}""")
 
         except FileNotFoundError as error:
             self.show_error(str(error))
