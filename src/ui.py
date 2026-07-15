@@ -3,6 +3,8 @@ import shutil
 import subprocess
 import sys
 
+from settings_page import SettingsPage
+
 from pathlib import Path
 
 from PyQt6.QtGui import QPainter, QPainterPath, QPixmap
@@ -22,6 +24,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
 )
 
+# --- FUNCTIONS ---
 
 def read_video_properties(file_path):
     """Use FFprobe to read properties from the selected video."""
@@ -137,6 +140,9 @@ def create_video_thumbnail(file_path):
         )
 
     return thumbnail
+
+# --- CLASSES ---
+
 class DropArea(QFrame): # -- DROP AREA --
     file_selected = pyqtSignal(str)
 
@@ -152,6 +158,8 @@ class DropArea(QFrame): # -- DROP AREA --
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.thumbnail = None
+
+        self.selected_video = None
 
         # This means the label will not intercept mouse clicks.
         self.label.setAttribute(
@@ -374,10 +382,23 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
         main_layout.addWidget(title)
         main_layout.addLayout(content_layout)
 
-        central_widget = QWidget()
-        central_widget.setLayout(main_layout)
+        # First screen
+        self.file_page = QWidget()
+        self.file_page.setLayout(main_layout)
 
-        self.setCentralWidget(central_widget)
+        # Second screen, imported from settings_page.py
+        self.settings_page = SettingsPage()
+
+        # Container that stores both screens
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self.file_page)
+        self.pages.addWidget(self.settings_page)
+
+        self.setCentralWidget(self.pages)
+
+        self.continue_button.clicked.connect(self.open_settings)
+
+        self.settings_page.back_requested.connect(self.open_file_page)
 
     def video_selected(self, file_path):
         try:
@@ -411,11 +432,13 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
                 f"{file_size_mb:.2f} MB"
             )
 
+            self.selected_video = file_path
+            self.continue_button.setEnabled(True)
+
             print(f"Selected video: {file_path}")
             print(properties)
             
             self.continue_button.setEnabled(True)
-            self.continue_button.setStyleSheet("""QPushButton {font-size: 15px;font-weight: bold;padding: 8px;}""")
 
         except FileNotFoundError as error:
             self.show_error(str(error))
@@ -437,6 +460,19 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             self.show_error(
                 f"Could not understand the video information:\n{error}"
             )
+
+    def open_settings(self):
+        if self.selected_video is None:
+            self.show_error("Select a video first.")
+            return
+
+        self.settings_page.set_video(self.selected_video)
+
+        self.pages.setCurrentWidget(self.settings_page)
+
+
+    def open_file_page(self):
+        self.pages.setCurrentWidget(self.file_page)
 
     def show_error(self, message):
         QMessageBox.critical(
