@@ -34,8 +34,8 @@ class SettingsPage(QWidget):
         self.resolution_box.addItems([
             "1280 × 720",
             "1920 × 1080",
-            "2560 × 1440",
-            "3840 × 2160",
+            "2560 × 1440 (2K)",
+            "3840 × 2160 (4K)",
         ])
 
         self.fps_box = QComboBox()
