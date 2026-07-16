@@ -1,4 +1,11 @@
-# ffupscale
+<h1>
+  <img src="assets/icon.ico"
+       alt="ffupscale icon"
+       width="48"
+       align="absmiddle">
+  | ffupscale
+</h1>
+
 #### A simple video upscaler using FFmpeg — for people who don't want to mess about with commands.
 
 FFmpeg upscaling normally requires using a command prompt, terminal, or batch file, which can be complicated or inconvenient.
