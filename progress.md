@@ -12,9 +12,16 @@
 ### To-do next
 
 * Add functionality
+    * Create build_upscale_command()  
+    * Test command generation without encoding  
+    * Run a fixed 4K CPU encode from ffmpeg_runner.py  
+    * Automatically generate a safe output filename  
+    * Connect to UI
+    * Run encoding through QProcess  
+    * Pass settings-page values into the command builder  
+    * Add progress and cancellation  
+    * Add GPU encoder detection  
 * Add more selectors with "Custom" option for resolution and fps
-* Add "Render" button
-* Add render progress bar
 
 ### Notes
 
