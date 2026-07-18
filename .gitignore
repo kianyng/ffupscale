@@ -1,0 +1,30 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Large design source files
+*.psd
+*.psb
+*.png
+
+# PyInstaller output
+build/
+dist/
+*.spec
+
+# VS Code: ignore personal configuration but keep shared tasks
+.vscode/*
+!.vscode/tasks.json
+
+# Other editors
+.idea/
+
+# FFmpeg temporary and two-pass files
+ffmpeg2pass-*.log
+ffmpeg2pass-*.log.mbtree
+*.part

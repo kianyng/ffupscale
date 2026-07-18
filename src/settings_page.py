@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
+    QHBoxLayout,
 )
 
 
@@ -31,12 +32,31 @@ class SettingsPage(QWidget):
         )
 
         self.resolution_box = QComboBox()
-        self.resolution_box.addItems([
+
+        self.resolution_box.addItem(
             "1280 × 720",
+            (1280, 720),
+        )
+
+        self.resolution_box.addItem(
             "1920 × 1080",
-            "2560 × 1440 (2K)",
-            "3840 × 2160 (4K)",
-        ])
+            (1920, 1080),
+        )
+
+        self.resolution_box.addItem(
+            "2560 × 1440",
+            (2560, 1440),
+        )
+
+        self.resolution_box.addItem(
+            "3840 × 2160",
+            (3840, 2160),
+        )
+
+        self.resolution_box.addItem(
+            "Custom",
+            None,
+        )
 
         self.fps_box = QComboBox()
         self.fps_box.addItems([

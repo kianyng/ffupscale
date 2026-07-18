@@ -2,12 +2,13 @@ import json
 import shutil
 import subprocess
 import sys
+import ctypes
 
 from settings_page import SettingsPage
 
 from pathlib import Path
 
-from PyQt6.QtGui import QPainter, QPainterPath, QPixmap
+from PyQt6.QtGui import QPainter, QPainterPath, QPixmap, QIcon
 from PyQt6.QtCore import Qt, pyqtSignal, QRectF
 from PyQt6.QtWidgets import (
     QApplication,
@@ -483,9 +484,24 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32":
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "kianyng.ffupscale"
+        )
+
     app = QApplication(sys.argv)
 
+    icon_path = (
+        Path(__file__).resolve().parent.parent
+        / "assets"
+        / "icon.ico"
+    )
+
+    app_icon = QIcon(str(icon_path))
+    app.setWindowIcon(app_icon)
+
     window = MainWindow()
+    window.setWindowIcon(app_icon)
     window.show()
 
     sys.exit(app.exec())
