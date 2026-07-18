@@ -58,6 +58,47 @@ class SettingsPage(QWidget):
             None,
         )
 
+        self.custom_width = QSpinBox()
+        self.custom_width.setRange(16, 16384)
+        self.custom_width.setValue(1920)
+        self.custom_width.setSuffix(" px")
+        self.custom_width.setSingleStep(2)
+
+        self.custom_height = QSpinBox()
+        self.custom_height.setRange(16, 8640)
+        self.custom_height.setValue(1080)
+        self.custom_height.setSuffix(" px")
+        self.custom_height.setSingleStep(2)
+
+        custom_resolution_layout = QHBoxLayout()
+        custom_resolution_layout.setContentsMargins(0, 0, 0, 0)
+        custom_resolution_layout.setSpacing(3)
+
+        multiply_label = QLabel("×")
+
+        custom_resolution_layout.addWidget(
+            self.custom_width
+        )
+
+        custom_resolution_layout.addWidget(
+            multiply_label
+        )
+
+        custom_resolution_layout.addWidget(
+            self.custom_height
+        )
+
+        custom_resolution_layout.addStretch()
+
+        self.custom_resolution_widget = QWidget()
+        self.custom_resolution_widget.setLayout(
+            custom_resolution_layout
+        )
+
+        self.custom_resolution_label = QLabel(
+            "Custom resolution:"
+        )
+
         self.fps_box = QComboBox()
         self.fps_box.addItems([
             "Keep original",
@@ -78,6 +119,16 @@ class SettingsPage(QWidget):
             "Resolution:",
             self.resolution_box,
         )
+
+        settings_form.addRow(
+            self.custom_resolution_label,
+            self.custom_resolution_widget,
+        )
+
+        self.resolution_box.currentIndexChanged.connect(
+            self.update_custom_resolution_visibility
+        )
+
         settings_form.addRow(
             "Frame rate:",
             self.fps_box,
@@ -122,7 +173,40 @@ class SettingsPage(QWidget):
         layout.addStretch()
         layout.addLayout(button_layout)
 
+        self.update_custom_resolution_visibility()
+
     def set_video(self, file_path):
         self.video_name.setText(
             Path(file_path).name
         )
+
+    def update_custom_resolution_visibility(self):
+        custom_selected = (
+            self.resolution_box.currentData() is None
+        )
+
+        self.custom_resolution_label.setVisible(
+            custom_selected
+        )
+
+        self.custom_resolution_widget.setVisible(
+            custom_selected
+        )
+
+    def get_resolution(self):
+        preset_resolution = (
+          self.resolution_box.currentData()
+        )
+
+        if preset_resolution is not None:
+            return preset_resolution
+
+        width = self.custom_width.value()
+        height = self.custom_height.value()
+
+        if width % 2 != 0 or height % 2 != 0:
+            raise ValueError(
+                "Width and height must both be even numbers."
+            )
+
+        return width, height

@@ -290,6 +290,8 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
     def __init__(self):
         super().__init__()
 
+        self.selected_video = None
+        
         self.setWindowTitle("ffupscale")
         self.resize(693, 407)
 
