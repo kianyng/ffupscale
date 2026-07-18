@@ -436,7 +436,6 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             )
 
             self.selected_video = file_path
-            self.continue_button.setEnabled(True)
 
             print(f"Selected video: {file_path}")
             print(properties)
