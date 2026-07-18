@@ -91,6 +91,26 @@ class SettingsPage(QWidget):
         back_button.clicked.connect(
             self.back_requested.emit
         )
+        back_button.setStyleSheet("""
+            QPushButton {
+                font-size: 15px;
+                font-weight: bold;
+                padding: 8px;
+            }
+        """)
+
+        self.render_button = QPushButton("Render")
+        self.render_button.setStyleSheet("""
+            QPushButton {
+                font-size: 15px;
+                font-weight: bold;
+                padding: 8px;
+            }
+        """)
+
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(back_button, stretch=1)
+        button_layout.addWidget(self.render_button, stretch=1)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 20, 30, 30)
@@ -100,7 +120,7 @@ class SettingsPage(QWidget):
         layout.addWidget(self.video_name)
         layout.addLayout(settings_form)
         layout.addStretch()
-        layout.addWidget(back_button)
+        layout.addLayout(button_layout)
 
     def set_video(self, file_path):
         self.video_name.setText(
