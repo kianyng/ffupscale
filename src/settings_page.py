@@ -100,19 +100,43 @@ class SettingsPage(QWidget):
         )
 
         self.fps_box = QComboBox()
-        self.fps_box.addItems([
+
+        self.fps_box.addItem(
             "Keep original",
+            None,
+        )
+
+        self.fps_box.addItem(
             "30 FPS",
+            30,
+        )
+
+        self.fps_box.addItem(
             "60 FPS",
+            60,
+        )
+
+        self.fps_box.addItem(
             "120 FPS",
-        ])
+            120,
+        )
 
         self.quality_box = QComboBox()
-        self.quality_box.addItems([
+
+        self.quality_box.addItem(
             "Balanced",
+            "balanced",
+        )
+
+        self.quality_box.addItem(
             "High",
+            "high",
+        )
+
+        self.quality_box.addItem(
             "Near-lossless",
-        ])
+            "near_lossless",
+        )
 
         settings_form = QFormLayout()
         settings_form.addRow(
@@ -158,6 +182,10 @@ class SettingsPage(QWidget):
                 padding: 8px;
             }
         """)
+
+        self.render_button.clicked.connect(
+            self.test_settings
+        )
 
         button_layout = QHBoxLayout()
         button_layout.addWidget(back_button, stretch=1)
@@ -210,3 +238,22 @@ class SettingsPage(QWidget):
             )
 
         return width, height
+    
+    def get_settings(self):
+        width, height = self.get_resolution()
+
+        return {
+            "resolution": (width, height),
+            "fps": self.fps_box.currentData(),
+            "quality": self.quality_box.currentData(),
+        }
+    
+    def test_settings(self):
+        try:
+            settings = self.get_settings()
+
+            print("Selected settings:")
+            print(settings)
+
+        except ValueError as error:
+            print(f"Invalid settings: {error}")
