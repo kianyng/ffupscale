@@ -5,9 +5,22 @@ from pathlib import Path
 
 
 QUALITY_CRF = {
-    "balanced": 22,
-    "high": 18,
-    "near_lossless": 14,
+    "libx264": {
+        "balanced": 22,
+        "high": 18,
+        "near_lossless": 14,
+    },
+    "libx265": {
+        "balanced": 27,
+        "high": 22,
+        "near_lossless": 17,
+    },
+}
+
+ENCODING_PRESETS = {
+    "fast",
+    "medium",
+    "slow",
 }
 
 
@@ -42,6 +55,8 @@ def build_upscale_command(
     height,
     quality="high",
     fps=None,
+    encoder="libx264",
+    preset="medium",
 ):
     """
     Validate the settings and build an FFmpeg command.
@@ -79,9 +94,19 @@ def build_upscale_command(
             "Width and height must both be even numbers."
         )
 
-    if quality not in QUALITY_CRF:
+    if encoder not in QUALITY_CRF:
+        raise ValueError(
+        f"Unknown encoder: {encoder}"
+    )
+
+    if quality not in QUALITY_CRF[encoder]:
         raise ValueError(
             f"Unknown quality setting: {quality}"
+        )
+
+    if preset not in ENCODING_PRESETS:
+        raise ValueError(
+            f"Unknown encoding preset: {preset}"
         )
 
     if fps is not None and fps <= 0:
@@ -89,7 +114,7 @@ def build_upscale_command(
             "FPS must be greater than zero."
         )
 
-    crf = QUALITY_CRF[quality]
+    crf = QUALITY_CRF[encoder][quality]
 
     arguments = [
         "-progress",
@@ -111,9 +136,9 @@ def build_upscale_command(
         "-vf",
         f"scale={width}:{height}:flags=lanczos",
 
-        # H.264 CPU encoding
-        "-c:v", "libx264",
-        "-preset", "medium",
+        # Video encoding
+        "-c:v", encoder,
+        "-preset", preset,
         "-crf", str(crf),
 
         # Broad playback compatibility
@@ -125,6 +150,11 @@ def build_upscale_command(
         # Make MP4 begin playback sooner when streamed
         "-movflags", "+faststart",
     ]
+
+    if encoder == "libx265":
+        arguments.extend([
+            "-tag:v", "hvc1",
+        ])
 
     if fps is not None:
         arguments.extend([
@@ -144,6 +174,8 @@ def run_test_encode(
     height=2160,
     quality="high",
     fps=None,
+    encoder="libx264",
+    preset="medium",
 ):
     """
     Run a blocking test encode independently of the GUI.
@@ -158,6 +190,8 @@ def run_test_encode(
         height=height,
         quality=quality,
         fps=fps,
+        encoder=encoder,
+        preset=preset,
     )
 
     print("FFmpeg command:")

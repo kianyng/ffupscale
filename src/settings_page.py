@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget,
     QHBoxLayout,
     QProgressBar,
+    QDoubleSpinBox,
 )
 
 class SettingsPage(QWidget):
@@ -107,7 +108,12 @@ class SettingsPage(QWidget):
 
         self.fps_box.addItem(
             "Keep original",
-            None,
+            "original",
+        )
+
+        self.fps_box.addItem(
+            "24 FPS",
+            24,
         )
 
         self.fps_box.addItem(
@@ -123,6 +129,26 @@ class SettingsPage(QWidget):
         self.fps_box.addItem(
             "120 FPS",
             120,
+        )
+
+        self.fps_box.addItem(
+            "Custom",
+            "custom",
+        )
+
+        self.custom_fps = QDoubleSpinBox()
+        self.custom_fps.setRange(1.0, 240.0)
+        self.custom_fps.setValue(60.0)
+        self.custom_fps.setDecimals(3)
+        self.custom_fps.setSingleStep(1.0)
+        self.custom_fps.setSuffix(" FPS")
+
+        self.custom_fps_label = QLabel(
+            "Custom frame rate:"
+        )
+
+        self.fps_box.currentIndexChanged.connect(
+            self.update_custom_fps_visibility
         )
 
         self.quality_box = QComboBox()
@@ -141,6 +167,38 @@ class SettingsPage(QWidget):
             "Near-lossless",
             "near_lossless",
         )
+
+        self.encoder_box = QComboBox()
+
+        self.encoder_box.addItem(
+            "H.264 — best compatibility",
+            "libx264",
+        )
+
+        self.encoder_box.addItem(
+            "H.265 — smaller files",
+            "libx265",
+        )
+
+
+        self.preset_box = QComboBox()
+
+        self.preset_box.addItem(
+            "Fast",
+            "fast",
+        )
+
+        self.preset_box.addItem(
+            "Medium",
+            "medium",
+        )
+
+        self.preset_box.addItem(
+            "Slow — better compression",
+            "slow",
+        )
+
+        self.preset_box.setCurrentIndex(1)
 
         settings_form = QFormLayout()
         settings_form.addRow(
@@ -161,9 +219,25 @@ class SettingsPage(QWidget):
             "Frame rate:",
             self.fps_box,
         )
+
+        settings_form.addRow(
+            self.custom_fps_label,
+            self.custom_fps,
+        )
+        
         settings_form.addRow(
             "Quality:",
             self.quality_box,
+        )
+
+        settings_form.addRow(
+            "Encoder:",
+            self.encoder_box,
+        )
+
+        settings_form.addRow(
+            "Encoding speed:",
+            self.preset_box,
         )
 
         self.back_button = QPushButton("Back")
@@ -219,6 +293,9 @@ class SettingsPage(QWidget):
 
         self.update_custom_resolution_visibility()
 
+        self.update_custom_resolution_visibility()
+        self.update_custom_fps_visibility()
+
     def set_video(self, file_path):
         self.video_name.setText(
             Path(file_path).name
@@ -236,6 +313,30 @@ class SettingsPage(QWidget):
         self.custom_resolution_widget.setVisible(
             custom_selected
         )
+
+    def update_custom_fps_visibility(self):
+        custom_selected = (
+            self.fps_box.currentData() == "custom"
+        )
+
+        self.custom_fps_label.setVisible(
+            custom_selected
+        )
+
+        self.custom_fps.setVisible(
+            custom_selected
+        )
+
+    def get_fps(self):
+        selected_fps = self.fps_box.currentData()
+
+        if selected_fps == "original":
+            return None
+
+        if selected_fps == "custom":
+            return self.custom_fps.value()
+
+        return selected_fps
 
     def get_resolution(self):
         preset_resolution = (
@@ -260,8 +361,10 @@ class SettingsPage(QWidget):
 
         return {
             "resolution": (width, height),
-            "fps": self.fps_box.currentData(),
+            "fps": self.get_fps(),
             "quality": self.quality_box.currentData(),
+            "encoder": self.encoder_box.currentData(),
+            "preset": self.preset_box.currentData(),
         }
     
     def request_render(self):

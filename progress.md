@@ -12,10 +12,11 @@
 * Added a "Custom" option - just for resolution at the moment, but will add for fps
 * Added functionality with render button connecting to ffmpeg
 * Added progress bar and cancel button
+* Added more selectors with "Custom" option for resolution and fps
+* Added encoding options
 
 ### To-do next
 
-* Add more selectors with "Custom" option for resolution and fps
 * Advanced quality options
 * Output folder and filename
 
@@ -29,4 +30,5 @@
 * Thumbnail spacing bug still not fixed, but that's not really a priority at the moment.
 * I have added a settings page (placeholder), and functionality to the continue button along with a back button from the settings page.  
 * It is looking very nice and I am very proud of it so far. Just need to add functionality really.  
-* I am very proud of this. It now has functionality and looks so good. Just the final touches then I can do a full release.
+* I am very proud of this. It now has functionality and looks so good. Just the final touches then I can do a full release.  
+* I've now added encoding settings, and so I will do a 1.0 release with an exe for people to test. Of course, many more features will be added, and this is just a beta.  

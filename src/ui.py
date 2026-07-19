@@ -298,7 +298,7 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
         self.video_duration = 0.0 
         
         self.setWindowTitle("ffupscale")
-        self.resize(693, 407)
+        self.resize(975, 555)
 
         # Application title
         title = QLabel("ffupscale")
@@ -554,6 +554,8 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
                 height=height,
                 quality=settings["quality"],
                 fps=settings["fps"],
+                encoder=settings["encoder"],
+                preset=settings["preset"],
             )
 
             self.current_output_path = output_path
