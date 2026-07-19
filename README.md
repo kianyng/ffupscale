@@ -5,7 +5,7 @@
     width="48"
     align="absmiddle"
   >
-  ffupscale
+  | ffupscale
 </h1>
 
 #### A simple FFmpeg video upscaler for people who don't want to work with commands.
