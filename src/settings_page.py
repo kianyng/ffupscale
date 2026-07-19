@@ -3,18 +3,22 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
-    QHBoxLayout,
-    QProgressBar,
-    QDoubleSpinBox,
 )
 
+
 class SettingsPage(QWidget):
+    """Collect encoding settings and report user actions to MainWindow."""
+
+    # MainWindow owns navigation and FFmpeg, so this page communicates by signal.
     back_requested = pyqtSignal()
     render_requested = pyqtSignal(dict)
     cancel_requested = pyqtSignal()
@@ -23,7 +27,7 @@ class SettingsPage(QWidget):
         super().__init__()
 
         self.is_rendering = False
-        
+
         title = QLabel("Upscale settings")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("""
@@ -32,12 +36,10 @@ class SettingsPage(QWidget):
         """)
 
         self.video_name = QLabel("No video selected")
-        self.video_name.setAlignment(
-            Qt.AlignmentFlag.AlignCenter
-        )
+        self.video_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.resolution_box = QComboBox()
-
+        # Item data holds the actual dimensions used by FFmpeg.
         self.resolution_box.addItem(
             "1280 × 720",
             (1280, 720),
@@ -81,31 +83,21 @@ class SettingsPage(QWidget):
 
         multiply_label = QLabel("×")
 
-        custom_resolution_layout.addWidget(
-            self.custom_width
-        )
+        custom_resolution_layout.addWidget(self.custom_width)
 
-        custom_resolution_layout.addWidget(
-            multiply_label
-        )
+        custom_resolution_layout.addWidget(multiply_label)
 
-        custom_resolution_layout.addWidget(
-            self.custom_height
-        )
+        custom_resolution_layout.addWidget(self.custom_height)
 
         custom_resolution_layout.addStretch()
 
         self.custom_resolution_widget = QWidget()
-        self.custom_resolution_widget.setLayout(
-            custom_resolution_layout
-        )
+        self.custom_resolution_widget.setLayout(custom_resolution_layout)
 
-        self.custom_resolution_label = QLabel(
-            "Custom resolution:"
-        )
+        self.custom_resolution_label = QLabel("Custom resolution:")
 
         self.fps_box = QComboBox()
-
+        # String sentinels distinguish special options from numeric frame rates.
         self.fps_box.addItem(
             "Keep original",
             "original",
@@ -143,13 +135,9 @@ class SettingsPage(QWidget):
         self.custom_fps.setSingleStep(1.0)
         self.custom_fps.setSuffix(" FPS")
 
-        self.custom_fps_label = QLabel(
-            "Custom frame rate:"
-        )
+        self.custom_fps_label = QLabel("Custom frame rate:")
 
-        self.fps_box.currentIndexChanged.connect(
-            self.update_custom_fps_visibility
-        )
+        self.fps_box.currentIndexChanged.connect(self.update_custom_fps_visibility)
 
         self.quality_box = QComboBox()
 
@@ -179,7 +167,6 @@ class SettingsPage(QWidget):
             "H.265 — smaller files",
             "libx265",
         )
-
 
         self.preset_box = QComboBox()
 
@@ -224,7 +211,7 @@ class SettingsPage(QWidget):
             self.custom_fps_label,
             self.custom_fps,
         )
-        
+
         settings_form.addRow(
             "Quality:",
             self.quality_box,
@@ -241,10 +228,8 @@ class SettingsPage(QWidget):
         )
 
         self.back_button = QPushButton("Back")
-        
-        self.back_button.clicked.connect(
-            self.back_requested.emit
-        )
+
+        self.back_button.clicked.connect(self.back_requested.emit)
 
         self.back_button.setStyleSheet("""
             QPushButton {
@@ -255,7 +240,7 @@ class SettingsPage(QWidget):
         """)
 
         self.render_button = QPushButton("Render")
-        
+
         self.render_button.setStyleSheet("""
             QPushButton {
                 font-size: 15px;
@@ -264,9 +249,7 @@ class SettingsPage(QWidget):
             }
         """)
 
-        self.render_button.clicked.connect(
-            self.request_render
-        )
+        self.render_button.clicked.connect(self.request_render)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -287,47 +270,37 @@ class SettingsPage(QWidget):
         layout.addWidget(self.video_name)
         layout.addLayout(settings_form)
         layout.addStretch()
-        
+
         layout.addWidget(self.progress_bar)
         layout.addLayout(button_layout)
-
-        self.update_custom_resolution_visibility()
 
         self.update_custom_resolution_visibility()
         self.update_custom_fps_visibility()
 
     def set_video(self, file_path):
-        self.video_name.setText(
-            Path(file_path).name
-        )
+        self.video_name.setText(Path(file_path).name)
 
     def update_custom_resolution_visibility(self):
-        custom_selected = (
-            self.resolution_box.currentData() is None
-        )
+        """Show custom dimensions only when Custom is selected."""
 
-        self.custom_resolution_label.setVisible(
-            custom_selected
-        )
+        custom_selected = self.resolution_box.currentData() is None
 
-        self.custom_resolution_widget.setVisible(
-            custom_selected
-        )
+        self.custom_resolution_label.setVisible(custom_selected)
+
+        self.custom_resolution_widget.setVisible(custom_selected)
 
     def update_custom_fps_visibility(self):
-        custom_selected = (
-            self.fps_box.currentData() == "custom"
-        )
+        """Show the FPS input only when Custom is selected."""
 
-        self.custom_fps_label.setVisible(
-            custom_selected
-        )
+        custom_selected = self.fps_box.currentData() == "custom"
 
-        self.custom_fps.setVisible(
-            custom_selected
-        )
+        self.custom_fps_label.setVisible(custom_selected)
+
+        self.custom_fps.setVisible(custom_selected)
 
     def get_fps(self):
+        """Return None to preserve FPS, or the selected numeric value."""
+
         selected_fps = self.fps_box.currentData()
 
         if selected_fps == "original":
@@ -339,9 +312,9 @@ class SettingsPage(QWidget):
         return selected_fps
 
     def get_resolution(self):
-        preset_resolution = (
-          self.resolution_box.currentData()
-        )
+        """Return validated output dimensions from the preset or custom inputs."""
+
+        preset_resolution = self.resolution_box.currentData()
 
         if preset_resolution is not None:
             return preset_resolution
@@ -350,13 +323,13 @@ class SettingsPage(QWidget):
         height = self.custom_height.value()
 
         if width % 2 != 0 or height % 2 != 0:
-            raise ValueError(
-                "Width and height must both be even numbers."
-            )
+            raise ValueError("Width and height must both be even numbers.")
 
         return width, height
-    
+
     def get_settings(self):
+        """Build the settings dictionary consumed by the FFmpeg backend."""
+
         width, height = self.get_resolution()
 
         return {
@@ -366,8 +339,10 @@ class SettingsPage(QWidget):
             "encoder": self.encoder_box.currentData(),
             "preset": self.preset_box.currentData(),
         }
-    
+
     def request_render(self):
+        """Treat the primary button as Render or Cancel based on page state."""
+
         if self.is_rendering:
             self.cancel_requested.emit()
             return
@@ -380,6 +355,8 @@ class SettingsPage(QWidget):
             print(f"Invalid settings: {error}")
 
     def set_rendering(self, rendering):
+        """Update controls when an FFmpeg process starts or stops."""
+
         self.is_rendering = rendering
         self.back_button.setEnabled(not rendering)
 
@@ -395,9 +372,13 @@ class SettingsPage(QWidget):
             self.render_button.setEnabled(True)
 
     def set_cancelling(self):
+        """Prevent repeated cancellation requests while FFmpeg is stopping."""
+
         self.render_button.setText("Cancelling...")
         self.render_button.setEnabled(False)
 
     def set_progress(self, percentage):
+        """Clamp FFmpeg progress to the range accepted by QProgressBar."""
+
         percentage = max(0, min(100, int(percentage)))
         self.progress_bar.setValue(percentage)
