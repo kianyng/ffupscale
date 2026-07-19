@@ -1,15 +1,10 @@
 import json
 import shutil
 import subprocess
-import sys
-import ctypes
-
-from settings_page import SettingsPage
-
 from pathlib import Path
 
-from PyQt6.QtGui import QPainter, QPainterPath, QPixmap, QIcon
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QProcess
+from PyQt6.QtCore import QProcess, QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -19,24 +14,27 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
-    QVBoxLayout,
-    QWidget,
     QPushButton,
     QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from ffmpeg_runner import (
     build_upscale_command,
     create_output_path,
 )
+from settings_page import SettingsPage
 
+# Prevent FFmpeg and FFprobe from opening console windows on Windows.
 SUBPROCESS_FLAGS = getattr(
     subprocess,
     "CREATE_NO_WINDOW",
     0,
 )
 
-# --- FUNCTIONS ---
+# Video inspection helpers
+
 
 def read_video_properties(file_path):
     """Use FFprobe to read properties from the selected video."""
@@ -51,14 +49,14 @@ def read_video_properties(file_path):
 
     command = [
         ffprobe_path,
-        "-v", "error",
-        "-select_streams", "v:0",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
         "-show_entries",
-        (
-            "stream=width,height,avg_frame_rate,codec_name:"
-            "format=duration,size"
-        ),
-        "-of", "json",
+        ("stream=width,height,avg_frame_rate,codec_name:" "format=duration,size"),
+        "-of",
+        "json",
         file_path,
     ]
 
@@ -111,22 +109,29 @@ def format_duration(duration_seconds):
 
     return f"{minutes}:{seconds:02}"
 
+
 def create_video_thumbnail(file_path):
+    """Extract a PNG frame one second into the selected video."""
+
     ffmpeg_path = shutil.which("ffmpeg")
 
     if ffmpeg_path is None:
-        raise FileNotFoundError(
-            "FFmpeg could not be found."
-        )
+        raise FileNotFoundError("FFmpeg could not be found.")
 
     command = [
         ffmpeg_path,
-        "-v", "error",
-        "-ss", "1",
-        "-i", file_path,
-        "-frames:v", "1",
-        "-f", "image2pipe",
-        "-vcodec", "png",
+        "-v",
+        "error",
+        "-ss",
+        "1",
+        "-i",
+        file_path,
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "png",
         "pipe:1",
     ]
 
@@ -137,27 +142,26 @@ def create_video_thumbnail(file_path):
     )
 
     if result.returncode != 0 or not result.stdout:
-        ffmpeg_error = result.stderr.decode(
-            errors="replace"
-        )
+        ffmpeg_error = result.stderr.decode(errors="replace")
 
         raise ValueError(
-            f"FFmpeg could not create a video thumbnail:\n"
-            f"{ffmpeg_error}"
+            f"FFmpeg could not create a video thumbnail:\n" f"{ffmpeg_error}"
         )
 
     thumbnail = QPixmap()
 
     if not thumbnail.loadFromData(result.stdout):
-        raise ValueError(
-            "The thumbnail image could not be loaded."
-        )
+        raise ValueError("The thumbnail image could not be loaded.")
 
     return thumbnail
 
-# --- CLASSES ---
 
-class DropArea(QFrame): # -- DROP AREA --
+# User interface
+
+
+class DropArea(QFrame):
+    """Clickable drag-and-drop target that previews the selected video."""
+
     file_selected = pyqtSignal(str)
 
     def __init__(self):
@@ -174,9 +178,7 @@ class DropArea(QFrame): # -- DROP AREA --
         self.thumbnail = None
 
         # This means the label will not intercept mouse clicks.
-        self.label.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents
-        )
+        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.label)
@@ -202,6 +204,8 @@ class DropArea(QFrame): # -- DROP AREA --
         """)
 
     def mousePressEvent(self, event):
+        """Open the file picker when the drop area is clicked."""
+
         if event.button() == Qt.MouseButton.LeftButton:
             self.open_file_browser()
 
@@ -212,22 +216,23 @@ class DropArea(QFrame): # -- DROP AREA --
             self,
             "Select a video",
             "",
-            (
-                "Video files (*.mp4 *.mov *.mkv *.avi *.webm);;"
-                "All files (*.*)"
-            ),
+            ("Video files (*.mp4 *.mov *.mkv *.avi *.webm);;" "All files (*.*)"),
         )
 
         if file_path:
             self.select_file(file_path)
 
     def dragEnterEvent(self, event):
+        """Accept drag operations that contain local file URLs."""
+
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dropEvent(self, event):
+        """Use the first valid local file in a drop operation."""
+
         urls = event.mimeData().urls()
 
         if not urls:
@@ -243,14 +248,14 @@ class DropArea(QFrame): # -- DROP AREA --
             event.ignore()
 
     def select_file(self, file_path):
+        """Generate a thumbnail, then notify MainWindow of the selection."""
+
         self.label.setText("Loading video...")
 
         QApplication.processEvents()
 
         try:
-            self.thumbnail = create_video_thumbnail(
-                file_path
-            )
+            self.thumbnail = create_video_thumbnail(file_path)
             self.display_thumbnail()
 
         except (FileNotFoundError, ValueError) as error:
@@ -261,6 +266,8 @@ class DropArea(QFrame): # -- DROP AREA --
         self.file_selected.emit(file_path)
 
     def display_thumbnail(self):
+        """Scale and clip the thumbnail to a rounded rectangle."""
+
         if self.thumbnail is None:
             return
 
@@ -275,13 +282,9 @@ class DropArea(QFrame): # -- DROP AREA --
 
         painter = QPainter(rounded_thumbnail)
 
-        painter.setRenderHint(
-            QPainter.RenderHint.Antialiasing
-        )
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        painter.setRenderHint(
-            QPainter.RenderHint.SmoothPixmapTransform
-        )
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
         clipping_path = QPainterPath()
         clipping_path.addRoundedRect(
@@ -300,17 +303,19 @@ class DropArea(QFrame): # -- DROP AREA --
         super().resizeEvent(event)
 
         if self.thumbnail is not None:
-            self.display_thumbnail()    
+            self.display_thumbnail()
 
 
-class MainWindow(QMainWindow): # -- MAIN WINDOW --
+class MainWindow(QMainWindow):
+    """Coordinate video selection, navigation, and FFmpeg rendering."""
+
     def __init__(self):
         super().__init__()
 
         self.selected_video = None
 
-        self.video_duration = 0.0 
-        
+        self.video_duration = 0.0
+
         self.setWindowTitle("ffupscale")
         self.resize(975, 555)
 
@@ -398,7 +403,7 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
         # Complete window layout
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(30,20,30,30,)
+        main_layout.setContentsMargins(30, 20, 30, 30)
         main_layout.setSpacing(20)
 
         main_layout.addWidget(title)
@@ -413,25 +418,17 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
         self.ffmpeg_process = QProcess(self)
         self.ffmpeg_log = ""
-        self.progress_buffer = ""  
+        self.progress_buffer = ""
         self.current_output_path = None
         self.render_was_cancelled = False
 
-        self.ffmpeg_process.readyReadStandardOutput.connect(
-            self.read_ffmpeg_progress
-        )
+        self.ffmpeg_process.readyReadStandardOutput.connect(self.read_ffmpeg_progress)
 
-        self.ffmpeg_process.readyReadStandardError.connect(
-            self.read_ffmpeg_output
-        )
+        self.ffmpeg_process.readyReadStandardError.connect(self.read_ffmpeg_output)
 
-        self.ffmpeg_process.finished.connect(
-            self.render_finished
-        )
+        self.ffmpeg_process.finished.connect(self.render_finished)
 
-        self.ffmpeg_process.errorOccurred.connect(
-            self.process_error
-        )
+        self.ffmpeg_process.errorOccurred.connect(self.process_error)
 
         # Container that stores both screens
         self.pages = QStackedWidget()
@@ -442,19 +439,15 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
         self.continue_button.clicked.connect(self.open_settings)
 
-        self.settings_page.back_requested.connect(
-            self.open_file_page
-        )
+        self.settings_page.back_requested.connect(self.open_file_page)
 
-        self.settings_page.render_requested.connect(
-            self.start_render
-        )
+        self.settings_page.render_requested.connect(self.start_render)
 
-        self.settings_page.cancel_requested.connect(
-            self.cancel_render
-        )
+        self.settings_page.cancel_requested.connect(self.cancel_render)
 
     def video_selected(self, file_path):
+        """Read video metadata and populate the summary page."""
+
         self.selected_video = None
         self.video_duration = 0.0
         self.continue_button.setEnabled(False)
@@ -464,39 +457,27 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
             self.video_duration = properties["duration"]
 
-            file_size_mb = (
-                properties["file_size"] / (1024 * 1024)
-            )
+            file_size_mb = properties["file_size"] / (1024 * 1024)
 
             self.resolution_value.setText(
                 f"{properties['width']} × {properties['height']}"
             )
 
-            self.fps_value.setText(
-                f"{properties['fps']:.2f} FPS"
-            )
+            self.fps_value.setText(f"{properties['fps']:.2f} FPS")
 
-            self.duration_value.setText(
-                format_duration(properties["duration"])
-            )
+            self.duration_value.setText(format_duration(properties["duration"]))
 
-            self.codec_value.setText(
-                properties["codec"].upper()
-            )
+            self.codec_value.setText(properties["codec"].upper())
 
-            self.format_value.setText(
-                properties["format"]
-            )
+            self.format_value.setText(properties["format"])
 
-            self.file_size_value.setText(
-                f"{file_size_mb:.2f} MB"
-            )
+            self.file_size_value.setText(f"{file_size_mb:.2f} MB")
 
             self.selected_video = file_path
 
             print(f"Selected video: {file_path}")
             print(properties)
-            
+
             self.continue_button.setEnabled(True)
 
         except FileNotFoundError as error:
@@ -516,9 +497,7 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             ValueError,
             IndexError,
         ) as error:
-            self.show_error(
-                f"Could not understand the video information:\n{error}"
-            )
+            self.show_error(f"Could not understand the video information:\n{error}")
 
     def open_settings(self):
         if self.selected_video is None:
@@ -540,24 +519,19 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
         )
 
     def start_render(self, settings):
+        """Build the command and start FFmpeg asynchronously."""
+
         if self.selected_video is None:
             self.show_error("Select a video first.")
             return
 
-        if (
-            self.ffmpeg_process.state()
-            != QProcess.ProcessState.NotRunning
-        ):
-            self.show_error(
-                "A video is already being rendered."
-            )
+        if self.ffmpeg_process.state() != QProcess.ProcessState.NotRunning:
+            self.show_error("A video is already being rendered.")
             return
 
         try:
             input_path = Path(self.selected_video)
-            output_path = create_output_path(
-                input_path
-            )
+            output_path = create_output_path(input_path)
 
             width, height = settings["resolution"]
 
@@ -580,11 +554,7 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             self.settings_page.set_rendering(True)
 
             print("Starting FFmpeg:")
-            print(
-                subprocess.list2cmdline(
-                    [ffmpeg_path, *arguments]
-                )
-            )
+            print(subprocess.list2cmdline([ffmpeg_path, *arguments]))
 
             self.ffmpeg_process.start(
                 ffmpeg_path,
@@ -601,36 +571,30 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             self.show_error(str(error))
 
     def read_ffmpeg_output(self):
-        output = (
-            self.ffmpeg_process
-            .readAllStandardError()
-        )
+        """Collect FFmpeg diagnostics from stderr for error reporting."""
 
-        text = bytes(output).decode(
-            errors="replace"
-        )
+        output = self.ffmpeg_process.readAllStandardError()
+
+        text = bytes(output).decode(errors="replace")
 
         self.ffmpeg_log += text
+        # Bound memory use while retaining the most recent diagnostic output.
         self.ffmpeg_log = self.ffmpeg_log[-100_000:]
-        
+
         print(text, end="")
 
     def read_ffmpeg_progress(self):
-        output = (
-            self.ffmpeg_process
-            .readAllStandardOutput()
-        )
+        """Parse FFmpeg's key=value progress stream from stdout."""
 
-        text = bytes(output).decode(
-            errors="replace"
-        )
+        output = self.ffmpeg_process.readAllStandardOutput()
+
+        text = bytes(output).decode(errors="replace")
 
         self.progress_buffer += text
 
+        # QProcess chunks may end mid-line, so preserve incomplete data.
         while "\n" in self.progress_buffer:
-            line, self.progress_buffer = (
-                self.progress_buffer.split("\n", 1)
-            )
+            line, self.progress_buffer = self.progress_buffer.split("\n", 1)
 
             line = line.strip()
 
@@ -641,20 +605,12 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
             if key == "out_time_us":
                 try:
-                    processed_seconds = (
-                        int(value) / 1_000_000
-                    )
+                    processed_seconds = int(value) / 1_000_000
 
                     if self.video_duration > 0:
-                        percentage = (
-                            processed_seconds
-                            / self.video_duration
-                            * 100
-                        )
+                        percentage = processed_seconds / self.video_duration * 100
 
-                        self.settings_page.set_progress(
-                            percentage
-                        )
+                        self.settings_page.set_progress(percentage)
 
                 except ValueError:
                     pass
@@ -667,8 +623,10 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
         exit_code,
         exit_status,
     ):
+        """Restore controls and report cancellation, success, or failure."""
+
         was_cancelled = self.render_was_cancelled
-        
+
         self.reset_render_button()
 
         if was_cancelled:
@@ -683,13 +641,13 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             )
             return
 
-        
-        if (exit_code == 0
-           and self.current_output_path is not None
-           and self.current_output_path.is_file()):
-            
+        if (
+            exit_code == 0
+            and self.current_output_path is not None
+            and self.current_output_path.is_file()
+        ):
             self.settings_page.set_progress(100)
-            
+
             QMessageBox.information(
                 self,
                 "Render complete",
@@ -700,43 +658,30 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             )
 
         else:
-            error_message = (
-                f"FFmpeg exited with code {exit_code}."
-            )
+            error_message = f"FFmpeg exited with code {exit_code}."
 
             if self.ffmpeg_log:
-                error_lines = (
-                    self.ffmpeg_log.strip().splitlines()
-                )
+                error_lines = self.ffmpeg_log.strip().splitlines()
 
                 final_lines = error_lines[-10:]
 
-                error_message += (
-                    "\n\n"
-                    + "\n".join(final_lines)
-                )
+                error_message += "\n\n" + "\n".join(final_lines)
 
             self.show_error(error_message)
 
     def process_error(self, process_error):
-        if (
-            process_error
-            == QProcess.ProcessError.FailedToStart
-        ):
+        if process_error == QProcess.ProcessError.FailedToStart:
             self.reset_render_button()
 
-            self.show_error(
-                "FFmpeg could not be started."
-            )
+            self.show_error("FFmpeg could not be started.")
 
     def reset_render_button(self):
         self.settings_page.set_rendering(False)
 
     def cancel_render(self):
-        if (
-            self.ffmpeg_process.state()
-            == QProcess.ProcessState.NotRunning
-        ):
+        """Ask FFmpeg to stop cleanly and finalize the partial file."""
+
+        if self.ffmpeg_process.state() == QProcess.ProcessState.NotRunning:
             return
 
         self.render_was_cancelled = True
