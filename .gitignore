@@ -2,10 +2,14 @@
 __pycache__/
 *.py[cod]
 
-# Virtual environments
 .venv/
-venv/
-env/
+build/
+build-onefile/
+build-folder/
+dist/
+release/
+release-folder/
+*.spec
 
 # Large design source files
 *.psd

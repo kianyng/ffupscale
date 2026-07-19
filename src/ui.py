@@ -30,6 +30,12 @@ from ffmpeg_runner import (
     create_output_path,
 )
 
+SUBPROCESS_FLAGS = getattr(
+    subprocess,
+    "CREATE_NO_WINDOW",
+    0,
+)
+
 # --- FUNCTIONS ---
 
 def read_video_properties(file_path):
@@ -61,6 +67,7 @@ def read_video_properties(file_path):
         capture_output=True,
         text=True,
         check=True,
+        creationflags=SUBPROCESS_FLAGS,
     )
 
     data = json.loads(result.stdout)
@@ -126,6 +133,7 @@ def create_video_thumbnail(file_path):
     result = subprocess.run(
         command,
         capture_output=True,
+        creationflags=SUBPROCESS_FLAGS,
     )
 
     if result.returncode != 0 or not result.stdout:
@@ -235,8 +243,14 @@ class DropArea(QFrame): # -- DROP AREA --
             event.ignore()
 
     def select_file(self, file_path):
+        self.label.setText("Loading video...")
+
+        QApplication.processEvents()
+
         try:
-            self.thumbnail = create_video_thumbnail(file_path)
+            self.thumbnail = create_video_thumbnail(
+                file_path
+            )
             self.display_thumbnail()
 
         except (FileNotFoundError, ValueError) as error:
@@ -730,26 +744,3 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
         # FFmpeg listens for "q" and stops cleanly.
         self.ffmpeg_process.write(b"q\n")
-
-if __name__ == "__main__":
-    if sys.platform == "win32":
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "kianyng.ffupscale"
-        )
-
-    app = QApplication(sys.argv)
-
-    icon_path = (
-        Path(__file__).resolve().parent.parent
-        / "assets"
-        / "icon.ico"
-    )
-
-    app_icon = QIcon(str(icon_path))
-    app.setWindowIcon(app_icon)
-
-    window = MainWindow()
-    window.setWindowIcon(app_icon)
-    window.show()
-
-    sys.exit(app.exec())
