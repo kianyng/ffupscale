@@ -11,11 +11,11 @@
 * Added a render button to the settings page
 * Added a "Custom" option - just for resolution at the moment, but will add for fps
 * Added functionality with render button connecting to ffmpeg
+* Added progress bar and cancel button
 
 ### To-do next
 
 * Add more selectors with "Custom" option for resolution and fps
-* Add progress bar with cancel button
 * Advanced quality options
 * Output folder and filename
 

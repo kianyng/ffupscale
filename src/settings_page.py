@@ -10,15 +10,19 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QHBoxLayout,
+    QProgressBar,
 )
 
 class SettingsPage(QWidget):
     back_requested = pyqtSignal()
     render_requested = pyqtSignal(dict)
+    cancel_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
 
+        self.is_rendering = False
+        
         title = QLabel("Upscale settings")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("""
@@ -190,6 +194,13 @@ class SettingsPage(QWidget):
             self.request_render
         )
 
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p%")
+        self.progress_bar.hide()
+
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.back_button, stretch=1)
         button_layout.addWidget(self.render_button, stretch=1)
@@ -202,6 +213,8 @@ class SettingsPage(QWidget):
         layout.addWidget(self.video_name)
         layout.addLayout(settings_form)
         layout.addStretch()
+        
+        layout.addWidget(self.progress_bar)
         layout.addLayout(button_layout)
 
         self.update_custom_resolution_visibility()
@@ -252,9 +265,36 @@ class SettingsPage(QWidget):
         }
     
     def request_render(self):
+        if self.is_rendering:
+            self.cancel_requested.emit()
+            return
+
         try:
             settings = self.get_settings()
             self.render_requested.emit(settings)
 
         except ValueError as error:
             print(f"Invalid settings: {error}")
+
+    def set_rendering(self, rendering):
+        self.is_rendering = rendering
+        self.back_button.setEnabled(not rendering)
+
+        if rendering:
+            self.render_button.setText("Cancel")
+            self.render_button.setEnabled(True)
+
+            self.progress_bar.setValue(0)
+            self.progress_bar.setFormat("%p%")
+            self.progress_bar.show()
+        else:
+            self.render_button.setText("Render")
+            self.render_button.setEnabled(True)
+
+    def set_cancelling(self):
+        self.render_button.setText("Cancelling...")
+        self.render_button.setEnabled(False)
+
+    def set_progress(self, percentage):
+        percentage = max(0, min(100, int(percentage)))
+        self.progress_bar.setValue(percentage)

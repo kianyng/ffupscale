@@ -294,6 +294,8 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
         super().__init__()
 
         self.selected_video = None
+
+        self.video_duration = 0.0 
         
         self.setWindowTitle("ffupscale")
         self.resize(693, 407)
@@ -397,7 +399,13 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
         self.ffmpeg_process = QProcess(self)
         self.ffmpeg_log = ""
+        self.progress_buffer = ""  
         self.current_output_path = None
+        self.render_was_cancelled = False
+
+        self.ffmpeg_process.readyReadStandardOutput.connect(
+            self.read_ffmpeg_progress
+        )
 
         self.ffmpeg_process.readyReadStandardError.connect(
             self.read_ffmpeg_output
@@ -428,12 +436,19 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             self.start_render
         )
 
+        self.settings_page.cancel_requested.connect(
+            self.cancel_render
+        )
+
     def video_selected(self, file_path):
         self.selected_video = None
+        self.video_duration = 0.0
         self.continue_button.setEnabled(False)
 
         try:
             properties = read_video_properties(file_path)
+
+            self.video_duration = properties["duration"]
 
             file_size_mb = (
                 properties["file_size"] / (1024 * 1024)
@@ -543,18 +558,10 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
             self.current_output_path = output_path
             self.ffmpeg_log = ""
+            self.progress_buffer = ""
+            self.render_was_cancelled = False
 
-            self.settings_page.render_button.setEnabled(
-                False
-            )
-
-            self.settings_page.back_button.setEnabled(
-                False
-            )
-
-            self.settings_page.render_button.setText(
-                "Rendering..."
-            )
+            self.settings_page.set_rendering(True)
 
             print("Starting FFmpeg:")
             print(
@@ -592,16 +599,81 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
         
         print(text, end="")
 
+    def read_ffmpeg_progress(self):
+        output = (
+            self.ffmpeg_process
+            .readAllStandardOutput()
+        )
+
+        text = bytes(output).decode(
+            errors="replace"
+        )
+
+        self.progress_buffer += text
+
+        while "\n" in self.progress_buffer:
+            line, self.progress_buffer = (
+                self.progress_buffer.split("\n", 1)
+            )
+
+            line = line.strip()
+
+            if "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+
+            if key == "out_time_us":
+                try:
+                    processed_seconds = (
+                        int(value) / 1_000_000
+                    )
+
+                    if self.video_duration > 0:
+                        percentage = (
+                            processed_seconds
+                            / self.video_duration
+                            * 100
+                        )
+
+                        self.settings_page.set_progress(
+                            percentage
+                        )
+
+                except ValueError:
+                    pass
+
+            elif key == "progress" and value == "end":
+                self.settings_page.set_progress(100)
+
     def render_finished(
         self,
         exit_code,
         exit_status,
     ):
+        was_cancelled = self.render_was_cancelled
+        
         self.reset_render_button()
 
+        if was_cancelled:
+            QMessageBox.information(
+                self,
+                "Render cancelled",
+                (
+                    "Rendering was cancelled."
+                    "\n\nA partial output file may remain at:"
+                    f"\n{self.current_output_path}"
+                ),
+            )
+            return
+
+        
         if (exit_code == 0
            and self.current_output_path is not None
            and self.current_output_path.is_file()):
+            
+            self.settings_page.set_progress(100)
+            
             QMessageBox.information(
                 self,
                 "Render complete",
@@ -642,17 +714,20 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             )
 
     def reset_render_button(self):
-        self.settings_page.render_button.setEnabled(
-            True
-        )
+        self.settings_page.set_rendering(False)
 
-        self.settings_page.render_button.setText(
-            "Render"
-        )
+    def cancel_render(self):
+        if (
+            self.ffmpeg_process.state()
+            == QProcess.ProcessState.NotRunning
+        ):
+            return
 
-        self.settings_page.back_button.setEnabled(
-            True
-        )
+        self.render_was_cancelled = True
+        self.settings_page.set_cancelling()
+
+        # FFmpeg listens for "q" and stops cleanly.
+        self.ffmpeg_process.write(b"q\n")
 
 if __name__ == "__main__":
     if sys.platform == "win32":

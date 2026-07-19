@@ -92,6 +92,9 @@ def build_upscale_command(
     crf = QUALITY_CRF[quality]
 
     arguments = [
+        "-progress",
+        "pipe:1",
+        "-nostats",
         "-hide_banner",
 
         # Refuse to overwrite an existing output.
