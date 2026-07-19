@@ -1,63 +1,63 @@
 <h1>
-  <img src="assets/icon.ico"
-       alt="ffupscale icon"
-       width="48"
-       align="absmiddle">
-  | ffupscale
+  <img
+    src="assets/icon.ico"
+    alt="ffupscale icon"
+    width="48"
+    align="absmiddle"
+  >
+  ffupscale
 </h1>
 
-#### A simple video upscaler using FFmpeg — for people who don't want to mess about with commands.
+#### A simple FFmpeg video upscaler for people who don't want to work with commands.
 
-FFmpeg upscaling normally requires using a command prompt, terminal, or batch file, which can be complicated or inconvenient.
+FFmpeg normally requires a command prompt, terminal, or batch file. ffupscale provides a native Windows interface with drag-and-drop video selection and customisable encoding settings.
 
-ffupscale is a native Windows application for easily upscaling videos with customisable settings and drag-and-drop capability, so you don't have to work with FFmpeg commands directly.
+> [!NOTE]
+> ffupscale is currently in beta. Bugs and incomplete features should be expected.
 
----
+## Download
 
-### [View progress - ffupscale now has a working prototype!](progress.md)
+[Download ffupscale v0.1.0 Beta 1](https://github.com/kianyng/ffupscale/releases/tag/v0.1.0-beta.1)
 
----
+After downloading:
 
-## Upcoming features
+1. Extract the ZIP file.
+2. Open the extracted `ffupscale` folder.
+3. Run `ffupscale.exe`.
 
-* Adjustable output resolution
-* Adjustable output FPS
-* Encoding presets
-* Quality presets
-* Output location
-* Target file size
+Do not run the application directly from inside the ZIP.
+
+## Features
+
+- Drag-and-drop video selection
+- Video thumbnail and property display
+- Preset and custom output resolutions
+- Preset and custom frame rates
+- H.264 and H.265 encoding
+- Configurable quality and encoding speed
+- Live rendering progress
+- Render cancellation
+
+## Planned features
+
+- Custom output location
+- Target file size and compression
+- Automatic FFmpeg detection and installation
+- Additional hardware encoders
+
+[View development progress](progress.md)
 
 ## Requirements
 
-### Required to run from source
+### Packaged application
 
-* [Python 3.9 or newer](https://www.python.org/downloads/)
-* [PyQt6](https://pypi.org/project/PyQt6/)
-* [FFmpeg](https://ffmpeg.org/download.html), including `ffmpeg` and `ffprobe`
+- Windows
+- [FFmpeg](https://ffmpeg.org/download.html), including `ffmpeg` and `ffprobe`
 
-FFmpeg's `bin` folder must be added to your system `PATH`. Confirm that both programs are available with:
+Python and PyQt6 are included in the packaged application and do not need to be installed separately.
+
+FFmpeg's `bin` folder must be available through your system `PATH`. Confirm that both programs are available by running:
 
 ```powershell
 ffmpeg -version
 ffprobe -version
-```
-
-### Development dependency
-
-* [Watchdog](https://pypi.org/project/watchdog/) powers the included VS Code auto-restart task.
-
-Python's standard library modules such as `json`, `pathlib`, `shutil`, `subprocess`, and `sys` are included with Python and do not need separate installation.
-
-## Installation (full windows exe coming soon)
-
-Clone the repository, open a terminal in its root folder, and install the Python dependencies:
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-Run the application with:
-
-```powershell
-python src/ui.py
-```
