@@ -9,7 +9,7 @@ from settings_page import SettingsPage
 from pathlib import Path
 
 from PyQt6.QtGui import QPainter, QPainterPath, QPixmap, QIcon
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF
+from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QProcess
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -23,6 +23,11 @@ from PyQt6.QtWidgets import (
     QWidget,
     QPushButton,
     QStackedWidget,
+)
+
+from ffmpeg_runner import (
+    build_upscale_command,
+    create_output_path,
 )
 
 # --- FUNCTIONS ---
@@ -159,8 +164,6 @@ class DropArea(QFrame): # -- DROP AREA --
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.thumbnail = None
-
-        self.selected_video = None
 
         # This means the label will not intercept mouse clicks.
         self.label.setAttribute(
@@ -392,6 +395,22 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
         # Second screen, imported from settings_page.py
         self.settings_page = SettingsPage()
 
+        self.ffmpeg_process = QProcess(self)
+        self.ffmpeg_log = ""
+        self.current_output_path = None
+
+        self.ffmpeg_process.readyReadStandardError.connect(
+            self.read_ffmpeg_output
+        )
+
+        self.ffmpeg_process.finished.connect(
+            self.render_finished
+        )
+
+        self.ffmpeg_process.errorOccurred.connect(
+            self.process_error
+        )
+
         # Container that stores both screens
         self.pages = QStackedWidget()
         self.pages.addWidget(self.file_page)
@@ -401,9 +420,18 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
         self.continue_button.clicked.connect(self.open_settings)
 
-        self.settings_page.back_requested.connect(self.open_file_page)
+        self.settings_page.back_requested.connect(
+            self.open_file_page
+        )
+
+        self.settings_page.render_requested.connect(
+            self.start_render
+        )
 
     def video_selected(self, file_path):
+        self.selected_video = None
+        self.continue_button.setEnabled(False)
+
         try:
             properties = read_video_properties(file_path)
 
@@ -472,7 +500,6 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
 
         self.pages.setCurrentWidget(self.settings_page)
 
-
     def open_file_page(self):
         self.pages.setCurrentWidget(self.file_page)
 
@@ -483,6 +510,149 @@ class MainWindow(QMainWindow): # -- MAIN WINDOW --
             message,
         )
 
+    def start_render(self, settings):
+        if self.selected_video is None:
+            self.show_error("Select a video first.")
+            return
+
+        if (
+            self.ffmpeg_process.state()
+            != QProcess.ProcessState.NotRunning
+        ):
+            self.show_error(
+                "A video is already being rendered."
+            )
+            return
+
+        try:
+            input_path = Path(self.selected_video)
+            output_path = create_output_path(
+                input_path
+            )
+
+            width, height = settings["resolution"]
+
+            ffmpeg_path, arguments = build_upscale_command(
+                input_path=input_path,
+                output_path=output_path,
+                width=width,
+                height=height,
+                quality=settings["quality"],
+                fps=settings["fps"],
+            )
+
+            self.current_output_path = output_path
+            self.ffmpeg_log = ""
+
+            self.settings_page.render_button.setEnabled(
+                False
+            )
+
+            self.settings_page.back_button.setEnabled(
+                False
+            )
+
+            self.settings_page.render_button.setText(
+                "Rendering..."
+            )
+
+            print("Starting FFmpeg:")
+            print(
+                subprocess.list2cmdline(
+                    [ffmpeg_path, *arguments]
+                )
+            )
+
+            self.ffmpeg_process.start(
+                ffmpeg_path,
+                arguments,
+            )
+
+        except (
+            FileNotFoundError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as error:
+            self.reset_render_button()
+            self.show_error(str(error))
+
+    def read_ffmpeg_output(self):
+        output = (
+            self.ffmpeg_process
+            .readAllStandardError()
+        )
+
+        text = bytes(output).decode(
+            errors="replace"
+        )
+
+        self.ffmpeg_log += text
+        self.ffmpeg_log = self.ffmpeg_log[-100_000:]
+        
+        print(text, end="")
+
+    def render_finished(
+        self,
+        exit_code,
+        exit_status,
+    ):
+        self.reset_render_button()
+
+        if (exit_code == 0
+           and self.current_output_path is not None
+           and self.current_output_path.is_file()):
+            QMessageBox.information(
+                self,
+                "Render complete",
+                (
+                    "The video was rendered successfully."
+                    f"\n\n{self.current_output_path}"
+                ),
+            )
+
+        else:
+            error_message = (
+                f"FFmpeg exited with code {exit_code}."
+            )
+
+            if self.ffmpeg_log:
+                error_lines = (
+                    self.ffmpeg_log.strip().splitlines()
+                )
+
+                final_lines = error_lines[-10:]
+
+                error_message += (
+                    "\n\n"
+                    + "\n".join(final_lines)
+                )
+
+            self.show_error(error_message)
+
+    def process_error(self, process_error):
+        if (
+            process_error
+            == QProcess.ProcessError.FailedToStart
+        ):
+            self.reset_render_button()
+
+            self.show_error(
+                "FFmpeg could not be started."
+            )
+
+    def reset_render_button(self):
+        self.settings_page.render_button.setEnabled(
+            True
+        )
+
+        self.settings_page.render_button.setText(
+            "Render"
+        )
+
+        self.settings_page.back_button.setEnabled(
+            True
+        )
 
 if __name__ == "__main__":
     if sys.platform == "win32":

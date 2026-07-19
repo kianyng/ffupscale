@@ -8,20 +8,16 @@
 * Added thumbnail in drop box
 * Added continue button
 * Added settings page and continue button functionality with back button
+* Added a render button to the settings page
+* Added a "Custom" option - just for resolution at the moment, but will add for fps
+* Added functionality with render button connecting to ffmpeg
 
 ### To-do next
 
-* Add functionality
-    * Create build_upscale_command()  
-    * Test command generation without encoding  
-    * Run a fixed 4K CPU encode from ffmpeg_runner.py  
-    * Automatically generate a safe output filename  
-    * Connect to UI
-    * Run encoding through QProcess  
-    * Pass settings-page values into the command builder  
-    * Add progress and cancellation  
-    * Add GPU encoder detection  
 * Add more selectors with "Custom" option for resolution and fps
+* Add progress bar with cancel button
+* Advanced quality options
+* Output folder and filename
 
 ### Notes
 
@@ -33,3 +29,4 @@
 * Thumbnail spacing bug still not fixed, but that's not really a priority at the moment.
 * I have added a settings page (placeholder), and functionality to the continue button along with a back button from the settings page.  
 * It is looking very nice and I am very proud of it so far. Just need to add functionality really.  
+* I am very proud of this. It now has functionality and looks so good. Just the final touches then I can do a full release.

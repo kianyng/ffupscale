@@ -12,9 +12,9 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
 )
 
-
 class SettingsPage(QWidget):
     back_requested = pyqtSignal()
+    render_requested = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
@@ -162,11 +162,13 @@ class SettingsPage(QWidget):
             self.quality_box,
         )
 
-        back_button = QPushButton("Back")
-        back_button.clicked.connect(
+        self.back_button = QPushButton("Back")
+        
+        self.back_button.clicked.connect(
             self.back_requested.emit
         )
-        back_button.setStyleSheet("""
+
+        self.back_button.setStyleSheet("""
             QPushButton {
                 font-size: 15px;
                 font-weight: bold;
@@ -175,6 +177,7 @@ class SettingsPage(QWidget):
         """)
 
         self.render_button = QPushButton("Render")
+        
         self.render_button.setStyleSheet("""
             QPushButton {
                 font-size: 15px;
@@ -184,11 +187,11 @@ class SettingsPage(QWidget):
         """)
 
         self.render_button.clicked.connect(
-            self.test_settings
+            self.request_render
         )
 
         button_layout = QHBoxLayout()
-        button_layout.addWidget(back_button, stretch=1)
+        button_layout.addWidget(self.back_button, stretch=1)
         button_layout.addWidget(self.render_button, stretch=1)
 
         layout = QVBoxLayout(self)
@@ -248,12 +251,10 @@ class SettingsPage(QWidget):
             "quality": self.quality_box.currentData(),
         }
     
-    def test_settings(self):
+    def request_render(self):
         try:
             settings = self.get_settings()
-
-            print("Selected settings:")
-            print(settings)
+            self.render_requested.emit(settings)
 
         except ValueError as error:
             print(f"Invalid settings: {error}")
