@@ -42,8 +42,9 @@ Do not run the application directly from inside the ZIP.
 
 - Custom output location
 - Target file size and compression
-- Automatic FFmpeg detection and installation
 - Additional hardware encoders
+- Bundled FFmpeg so you do not have to install it
+- Render queue
 
 [View development progress](progress.md)
 
