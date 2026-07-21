@@ -16,7 +16,7 @@ The bundled version is **FFmpeg 7.1.1**, using the
 [Gyan Doshi](https://www.gyan.dev/ffmpeg/builds/).
 
 FFmpeg is Copyright © 2000–2025 the FFmpeg developers. The bundled full build is
-licensed under the **GNU General Public License, version 3 or later (GPLv3+)**.
+licensed under the **GNU General Public License, version 3 (GPLv3)**.
 Its reported configuration includes `--enable-gpl`, `--enable-version3`,
 `--enable-static`, `--enable-libx264`, and `--enable-libx265`.
 
