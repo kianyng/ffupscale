@@ -42,7 +42,7 @@ Upstream source for this FFmpeg release:
     https://github.com/FFmpeg/FFmpeg/tree/n7.1.1
 
 License:
-    GNU General Public License, version 3 or later (GPLv3+)
+    GNU General Public License, version 3 (GPLv3)
     See GPL-3.0.txt in this directory.
 
 Modifications:
