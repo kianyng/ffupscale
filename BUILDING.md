@@ -30,8 +30,13 @@ policy problems and does not require activation.
 
 ## Build the application
 
+Because the spec file is written into `build-folder`, use absolute source paths.
+Otherwise, PyInstaller looks for `vendor` inside `build-folder`.
+
 ```powershell
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed --name ffupscale --distpath release-folder --workpath build-folder --specpath build-folder --icon assets\icon.ico --add-data "assets\icon.ico;assets" --add-binary "vendor\ffmpeg\bin\ffmpeg.exe;bin" --add-binary "vendor\ffmpeg\bin\ffprobe.exe;bin" src\main.py
+$repoRoot = (Get-Location).Path
+
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onedir --windowed --name ffupscale --distpath "$repoRoot\release-folder" --workpath "$repoRoot\build-folder" --specpath "$repoRoot\build-folder" --icon "$repoRoot\assets\icon.ico" --add-data "$repoRoot\assets\icon.ico;assets" --add-binary "$repoRoot\vendor\ffmpeg\bin\ffmpeg.exe;bin" --add-binary "$repoRoot\vendor\ffmpeg\bin\ffprobe.exe;bin" "$repoRoot\src\main.py"
 ```
 
 Copy the legal documents beside the executable so recipients can find them:
