@@ -25,7 +25,8 @@ After downloading:
 2. Open the extracted `ffupscale` folder.
 3. Run `ffupscale.exe`.
 
-Do not run the application directly from inside the ZIP or move `ffupscale.exe` away from its `_internal` folder.
+Do not run the application directly from inside the ZIP or move
+`ffupscale.exe` away from its `_internal` folder.
 
 ## Features
 
@@ -37,6 +38,7 @@ Do not run the application directly from inside the ZIP or move `ffupscale.exe` 
 - Configurable quality and encoding speed
 - Live rendering progress
 - Render cancellation
+- Bundled FFmpeg and FFprobe in the packaged Windows build
 
 ## Planned features
 
@@ -53,8 +55,28 @@ Do not run the application directly from inside the ZIP or move `ffupscale.exe` 
 
 - 64-bit Windows 10 or Windows 11
 
-Python, PyQt6, FFmpeg, and FFprobe are included in the packaged application and do not need to be installed separately.
+Python, PyQt6, FFmpeg, and FFprobe are included in the packaged application and
+do not need to be installed separately.
+
+### Running from source
+
+- Python 3.9 or newer
+- The packages listed in [requirements.txt](requirements.txt)
+- FFmpeg and FFprobe in `vendor/ffmpeg/bin`, or available on the system
+  `PATH`
+
+```powershell
+py -m pip install -r requirements.txt
+py src\main.py
+```
+
+See [BUILDING.md](BUILDING.md) for the complete Windows packaging and release
+checklist.
 
 ## Third-party software
 
-ffupscale includes FFmpeg. See [Third-party notices](THIRD_PARTY_NOTICES.md) for licensing and source information.
+Packaged releases include the unmodified FFmpeg 7.1.1 full Windows build,
+licensed under GPLv3+. See [Third-Party Notices](THIRD_PARTY_NOTICES.md), the
+[complete GPLv3 text](licenses/GPL-3.0.txt), and the
+[bundled-build record](licenses/FFmpeg-BUILD-INFO.txt) for licensing, source,
+and build information.
