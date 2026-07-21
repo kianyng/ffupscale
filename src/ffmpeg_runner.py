@@ -58,10 +58,6 @@ def build_upscale_command(
 
     ffmpeg_path = find_ffmpeg()
 
-    if ffmpeg_path is None:
-        raise FileNotFoundError(
-            "FFmpeg could not be found. Make sure it is " "installed and added to PATH."
-        )
 
     input_path = Path(input_path)
     output_path = Path(output_path)
@@ -179,28 +175,3 @@ def run_test_encode(
 
     return output_path, result.returncode
 
-
-if __name__ == "__main__":
-    # This direct-run block is for backend testing without opening the GUI.
-    test_input = Path(r"C:\Users\Kian\Desktop\record\Replay 2026-07-15 01-45-46.mp4")
-
-    try:
-        output_file, exit_code = run_test_encode(
-            input_path=test_input,
-            width=3840,
-            height=2160,
-            quality="high",
-            fps=None,
-        )
-
-        print("\nEncoding completed successfully.")
-        print(f"Exit code: {exit_code}")
-        print(f"Created: {output_file}")
-
-    except (
-        FileNotFoundError,
-        ValueError,
-        subprocess.CalledProcessError,
-    ) as error:
-        print("\nEncoding failed:")
-        print(error)
