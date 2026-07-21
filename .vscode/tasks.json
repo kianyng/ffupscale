@@ -13,7 +13,7 @@
                 "--recursive",
                 "--",
                 "python",
-                "src/ui.py"
+                "src/main.py"
             ],
             "problemMatcher": [],
             "isBackground": true,

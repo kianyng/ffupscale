@@ -1,6 +1,7 @@
-import shutil
 import subprocess
 from pathlib import Path
+
+from ffmpeg_manager import find_ffmpeg
 
 QUALITY_CRF = {
     "libx264": {
@@ -55,7 +56,7 @@ def build_upscale_command(
     This function does not run FFmpeg.
     """
 
-    ffmpeg_path = shutil.which("ffmpeg")
+    ffmpeg_path = find_ffmpeg()
 
     if ffmpeg_path is None:
         raise FileNotFoundError(

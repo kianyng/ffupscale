@@ -10,6 +10,9 @@ dist/
 release/
 release-folder/
 *.spec
+build-test/
+ffupscale-v0.1.0-beta.2-windows/
+*.zip
 
 # Large design source files
 *.psd
@@ -32,3 +35,5 @@ dist/
 ffmpeg2pass-*.log
 ffmpeg2pass-*.log.mbtree
 *.part
+
+vendor/ffmpeg/bin/*.exe

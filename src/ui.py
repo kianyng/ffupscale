@@ -1,5 +1,4 @@
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -26,6 +25,11 @@ from ffmpeg_runner import (
 )
 from settings_page import SettingsPage
 
+from ffmpeg_manager import (
+    find_ffmpeg,
+    find_ffprobe,
+)
+
 # Prevent FFmpeg and FFprobe from opening console windows on Windows.
 SUBPROCESS_FLAGS = getattr(
     subprocess,
@@ -39,7 +43,7 @@ SUBPROCESS_FLAGS = getattr(
 def read_video_properties(file_path):
     """Use FFprobe to read properties from the selected video."""
 
-    ffprobe_path = shutil.which("ffprobe")
+    ffprobe_path = find_ffprobe()
 
     if ffprobe_path is None:
         raise FileNotFoundError(
@@ -113,7 +117,7 @@ def format_duration(duration_seconds):
 def create_video_thumbnail(file_path):
     """Extract a PNG frame one second into the selected video."""
 
-    ffmpeg_path = shutil.which("ffmpeg")
+    ffmpeg_path = find_ffmpeg()
 
     if ffmpeg_path is None:
         raise FileNotFoundError("FFmpeg could not be found.")
