@@ -1,0 +1,58 @@
+FFmpeg build information for packaged ffupscale distributions
+================================================================
+
+Recorded from:
+    vendor\ffmpeg\bin\ffmpeg.exe -version
+
+Version:
+    ffmpeg version 7.1.1-full_build-www.gyan.dev
+
+Copyright:
+    Copyright (c) 2000-2025 the FFmpeg developers
+
+Toolchain:
+    gcc 14.2.0 (Rev1, Built by MSYS2 project)
+
+Provider:
+    Gyan Doshi Windows builds
+    https://www.gyan.dev/ffmpeg/builds/
+
+Build type:
+    64-bit static "full" build
+
+Reported license-relevant configuration:
+    --enable-gpl
+    --enable-version3
+    --enable-static
+    --enable-libx264
+    --enable-libx265
+
+Library versions:
+    libavutil      59. 39.100
+    libavcodec     61. 19.101
+    libavformat    61.  7.100
+    libavdevice    61.  3.100
+    libavfilter    10.  4.100
+    libswscale      8.  3.100
+    libswresample   5.  3.100
+    libpostproc    58.  3.100
+
+Upstream source for this FFmpeg release:
+    https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz
+    https://github.com/FFmpeg/FFmpeg/tree/n7.1.1
+
+License:
+    GNU General Public License, version 3 or later (GPLv3+)
+    See GPL-3.0.txt in this directory.
+
+Modifications:
+    ffupscale does not modify the bundled FFmpeg or FFprobe executables.
+
+To inspect the complete configuration of the exact binaries being distributed,
+run both of these commands before publishing a release:
+
+    vendor\ffmpeg\bin\ffmpeg.exe -version
+    vendor\ffmpeg\bin\ffprobe.exe -version
+
+If the bundled binaries are replaced, update this file and
+THIRD_PARTY_NOTICES.md before publishing the next release.
