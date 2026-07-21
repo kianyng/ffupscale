@@ -17,7 +17,7 @@ FFmpeg normally requires a command prompt, terminal, or batch file. ffupscale pr
 
 ## Download
 
-[Download ffupscale v0.1.0 Beta 1](https://github.com/kianyng/ffupscale/releases/tag/v0.1.0-beta.1)
+[Download ffupscale v0.1.0 Beta 2](https://github.com/kianyng/ffupscale/releases/tag/v0.1.0-beta.2)
 
 After downloading:
 
@@ -25,7 +25,7 @@ After downloading:
 2. Open the extracted `ffupscale` folder.
 3. Run `ffupscale.exe`.
 
-Do not run the application directly from inside the ZIP.
+Do not run the application directly from inside the ZIP or move `ffupscale.exe` away from its `_internal` folder.
 
 ## Features
 
@@ -43,7 +43,6 @@ Do not run the application directly from inside the ZIP.
 - Custom output location
 - Target file size and compression
 - Additional hardware encoders
-- Bundled FFmpeg so you do not have to install it
 - Render queue
 
 [View development progress](progress.md)
@@ -52,13 +51,10 @@ Do not run the application directly from inside the ZIP.
 
 ### Packaged application
 
-- Windows
-- [FFmpeg](https://ffmpeg.org/download.html), including `ffmpeg` and `ffprobe`
+- 64-bit Windows 10 or Windows 11
 
-Python and PyQt6 are included in the packaged application and do not need to be installed separately.
+Python, PyQt6, FFmpeg, and FFprobe are included in the packaged application and do not need to be installed separately.
 
-FFmpeg's `bin` folder must be available through your system `PATH`. Confirm that both programs are available by running:
+## Third-party software
 
-```powershell
-ffmpeg -version
-ffprobe -version
+ffupscale includes FFmpeg. See [Third-party notices](THIRD_PARTY_NOTICES.md) for licensing and source information.
