@@ -76,7 +76,7 @@ checklist.
 ## Third-party software
 
 Packaged releases include the unmodified FFmpeg 7.1.1 full Windows build,
-licensed under GPLv3+. See [Third-Party Notices](THIRD_PARTY_NOTICES.md), the
+licensed under GPLv3. See [Third-Party Notices](THIRD_PARTY_NOTICES.md), the
 [complete GPLv3 text](licenses/GPL-3.0.txt), and the
 [bundled-build record](licenses/FFmpeg-BUILD-INFO.txt) for licensing, source,
 and build information.
