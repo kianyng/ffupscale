@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -173,7 +174,19 @@ class DropArea(QFrame):
 
         self.setObjectName("dropArea")
         self.setAcceptDrops(True)
-        self.setMinimumHeight(250)
+
+        # Keep a generous drop target before selection. Once a thumbnail is
+        # available, the frame is resized to match the video's aspect ratio.
+        self.empty_minimum_height = 250
+        self.thumbnail_padding = 12
+        self.setMinimumHeight(self.empty_minimum_height)
+
+        size_policy = QSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.setSizePolicy(size_policy)
+
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.label = QLabel("Drag file or click to browse")
@@ -185,6 +198,12 @@ class DropArea(QFrame):
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(
+            self.thumbnail_padding,
+            self.thumbnail_padding,
+            self.thumbnail_padding,
+            self.thumbnail_padding,
+        )
         layout.addWidget(self.label)
 
         self.setStyleSheet("""
@@ -260,14 +279,55 @@ class DropArea(QFrame):
 
         try:
             self.thumbnail = create_video_thumbnail(file_path)
+            self.update_thumbnail_height()
             self.display_thumbnail()
 
         except (FileNotFoundError, ValueError) as error:
             self.thumbnail = None
+
+            # Undo a previous thumbnail's fixed height if the new preview
+            # could not be generated.
+            self.setMinimumHeight(self.empty_minimum_height)
+            self.setMaximumHeight(16777215)
+
             self.label.setText(Path(file_path).name)
             print(f"Could not create thumbnail: {error}")
 
         self.file_selected.emit(file_path)
+
+    def thumbnail_height_for_width(self, width):
+        """Return the frame height needed for the thumbnail and its padding."""
+
+        if self.thumbnail is None or self.thumbnail.isNull():
+            return self.empty_minimum_height
+
+        content_width = max(
+            1,
+            width - (self.thumbnail_padding * 2),
+        )
+
+        content_height = round(
+            content_width
+            * self.thumbnail.height()
+            / self.thumbnail.width()
+        )
+
+        return content_height + (self.thumbnail_padding * 2)
+
+    def update_thumbnail_height(self):
+        """Resize the drop frame to surround the thumbnail evenly."""
+
+        if self.thumbnail is None or self.thumbnail.isNull():
+            return
+
+        target_height = self.thumbnail_height_for_width(
+            self.width()
+        )
+
+        if self.height() != target_height:
+            self.setFixedHeight(target_height)
+
+        self.updateGeometry()
 
     def display_thumbnail(self):
         """Scale and clip the thumbnail to a rounded rectangle."""
@@ -306,8 +366,20 @@ class DropArea(QFrame):
     def resizeEvent(self, event):
         super().resizeEvent(event)
 
-        if self.thumbnail is not None:
-            self.display_thumbnail()
+        if self.thumbnail is None:
+            return
+
+        target_height = self.thumbnail_height_for_width(
+            event.size().width()
+        )
+
+        # Changing the width may require a matching height change. The second
+        # resize event redraws the pixmap after the layout has settled.
+        if event.size().height() != target_height:
+            self.setFixedHeight(target_height)
+            return
+
+        self.display_thumbnail()
 
 
 class MainWindow(QMainWindow):
