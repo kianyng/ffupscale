@@ -21,6 +21,8 @@
 * Advanced quality options
 * Output folder and filename
 * Render queue
+* GPU encoding
+* Video Trimmer
 
 ### Notes
 
