@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -188,6 +189,7 @@ class SettingsPage(QWidget):
         self.preset_box.setCurrentIndex(1)
 
         settings_form = QFormLayout()
+        settings_form.setVerticalSpacing(20)
         settings_form.addRow(
             "Resolution:",
             self.resolution_box,
@@ -225,6 +227,89 @@ class SettingsPage(QWidget):
         settings_form.addRow(
             "Encoding speed:",
             self.preset_box,
+        )
+
+        # Put the settings form inside its own widget so QScrollArea can
+        # manage it. QScrollArea accepts a widget rather than a layout.
+        settings_content = QWidget()
+
+        settings_content_layout = QVBoxLayout(
+            settings_content
+        )
+        settings_content_layout.setContentsMargins(
+            0,
+            0,
+            10,
+            0,
+        )
+
+        settings_content_layout.addLayout(
+            settings_form
+        )
+        settings_content_layout.addStretch()
+
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setWidgetResizable(True)
+
+        # The settings only need to scroll vertically.
+        self.settings_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.settings_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+
+        self.settings_scroll.setWidget(
+            settings_content
+        )
+
+        # Remove the default border and background so the scroll area blends
+        # into the existing settings page.
+        self.settings_scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+
+            QScrollArea > QWidget > QWidget {
+                background: transparent;
+            }
+
+            QScrollBar:vertical {
+                background: transparent;
+                width: 8px;
+                margin: 0px;
+            }
+
+            QScrollBar::handle:vertical {
+                background-color: #555555;
+                min-height: 30px;
+                border-radius: 4px;
+            }
+
+            QScrollBar::handle:vertical:hover {
+                background-color: #6b7280;
+            }
+
+            QScrollBar::handle:vertical:pressed {
+                background-color: #3b82f6;
+            }
+
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {
+                height: 0px;
+                background: transparent;
+                border: none;
+            }
+
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {
+                background: transparent;
+            }
+        """)
+
+        self.settings_scroll.viewport().setAutoFillBackground(
+            False
         )
 
         self.back_button = QPushButton("Back")
@@ -268,9 +353,15 @@ class SettingsPage(QWidget):
 
         layout.addWidget(title)
         layout.addWidget(self.video_name)
-        layout.addLayout(settings_form)
-        layout.addStretch()
 
+        # The form expands into the available space and becomes scrollable
+        # when the window is not tall enough.
+        layout.addWidget(
+            self.settings_scroll,
+            stretch=1,
+        )
+
+        # Rendering controls remain visible outside the scrollable section.
         layout.addWidget(self.progress_bar)
         layout.addLayout(button_layout)
 
