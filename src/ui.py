@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from PyQt6.QtCore import QProcess, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QProcess, QRectF, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -183,8 +183,9 @@ class DropArea(QFrame):
 
         size_policy = QSizePolicy(
             QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
         )
+        size_policy.setHeightForWidth(True)
         self.setSizePolicy(size_policy)
 
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -193,6 +194,15 @@ class DropArea(QFrame):
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.thumbnail = None
+
+        # Avoid rebuilding a large, smoothly scaled pixmap for every individual
+        # mouse movement while the window is being resized.
+        self.thumbnail_resize_timer = QTimer(self)
+        self.thumbnail_resize_timer.setSingleShot(True)
+        self.thumbnail_resize_timer.setInterval(40)
+        self.thumbnail_resize_timer.timeout.connect(
+            self.display_thumbnail
+        )
 
         # This means the label will not intercept mouse clicks.
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -280,7 +290,7 @@ class DropArea(QFrame):
         try:
             self.thumbnail = create_video_thumbnail(file_path)
             self.update_thumbnail_height()
-            self.display_thumbnail()
+            self.thumbnail_resize_timer.start(0)
 
         except (FileNotFoundError, ValueError) as error:
             self.thumbnail = None
@@ -295,7 +305,12 @@ class DropArea(QFrame):
 
         self.file_selected.emit(file_path)
 
-    def thumbnail_height_for_width(self, width):
+    def hasHeightForWidth(self):
+        """Tell Qt that this widget's height depends on its width."""
+
+        return self.thumbnail is not None and not self.thumbnail.isNull()
+
+    def heightForWidth(self, width):
         """Return the frame height needed for the thumbnail and its padding."""
 
         if self.thumbnail is None or self.thumbnail.isNull():
@@ -314,19 +329,30 @@ class DropArea(QFrame):
 
         return content_height + (self.thumbnail_padding * 2)
 
-    def update_thumbnail_height(self):
-        """Resize the drop frame to surround the thumbnail evenly."""
+    def sizeHint(self):
+        """Provide a useful initial height before the layout asks for one."""
 
-        if self.thumbnail is None or self.thumbnail.isNull():
+        hint = super().sizeHint()
+
+        if self.hasHeightForWidth():
+            hint.setHeight(
+                self.heightForWidth(max(1, self.width()))
+            )
+        else:
+            hint.setHeight(self.empty_minimum_height)
+
+        return hint
+
+    def update_thumbnail_height(self):
+        """Ask the layout to recalculate the frame from its aspect ratio."""
+
+        if not self.hasHeightForWidth():
             return
 
-        target_height = self.thumbnail_height_for_width(
-            self.width()
-        )
-
-        if self.height() != target_height:
-            self.setFixedHeight(target_height)
-
+        # setFixedHeight() would cause recursive resize events. Height-for-width
+        # lets Qt calculate both dimensions together in one layout pass.
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
         self.updateGeometry()
 
     def display_thumbnail(self):
@@ -366,20 +392,10 @@ class DropArea(QFrame):
     def resizeEvent(self, event):
         super().resizeEvent(event)
 
-        if self.thumbnail is None:
-            return
-
-        target_height = self.thumbnail_height_for_width(
-            event.size().width()
-        )
-
-        # Changing the width may require a matching height change. The second
-        # resize event redraws the pixmap after the layout has settled.
-        if event.size().height() != target_height:
-            self.setFixedHeight(target_height)
-            return
-
-        self.display_thumbnail()
+        if self.thumbnail is not None:
+            # Restarting the single-shot timer postpones the expensive pixmap
+            # redraw until resizing pauses, keeping the window responsive.
+            self.thumbnail_resize_timer.start()
 
 
 class MainWindow(QMainWindow):
