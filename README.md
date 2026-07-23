@@ -80,3 +80,13 @@ licensed under GPLv3. See [Third-Party Notices](THIRD_PARTY_NOTICES.md), the
 [complete GPLv3 text](licenses/GPL-3.0.txt), and the
 [bundled-build record](licenses/FFmpeg-BUILD-INFO.txt) for licensing, source,
 and build information.
+
+## Licence
+
+ffupscale is licensed under the GNU General Public License v3.0.
+
+You may use, modify, and redistribute ffupscale, provided that distributed
+versions remain open-source under GPLv3 and retain the applicable copyright and
+licence notices.
+
+See [LICENSE](LICENSE.txt) for the complete terms.
