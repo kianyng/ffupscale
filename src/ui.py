@@ -177,7 +177,7 @@ class DropArea(QFrame):
 
         # Keep a generous drop target before selection. Once a thumbnail is
         # available, the frame is resized to match the video's aspect ratio.
-        self.empty_minimum_height = 250
+        self.empty_minimum_height = 350
         self.thumbnail_padding = 12
         self.setMinimumHeight(self.empty_minimum_height)
 
