@@ -193,6 +193,15 @@ class DropArea(QFrame):
         self.label = QLabel("Drag file or click to browse")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        # A QLabel normally uses its pixmap as its preferred size. Ignoring
+        # that hint prevents an enlarged thumbnail from becoming the window's
+        # new minimum size.
+        self.label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Ignored,
+        )
+        self.label.setMinimumSize(1, 1)
+
         self.thumbnail = None
 
         # Avoid rebuilding a large, smoothly scaled pixmap for every individual
