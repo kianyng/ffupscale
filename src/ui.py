@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from PyQt6.QtCore import QProcess, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QProcess, QRectF, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -14,15 +14,13 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from ffmpeg_runner import (
-    build_upscale_command,
-    create_output_path,
-)
+from ffmpeg_runner import build_upscale_command
 from settings_page import SettingsPage
 
 from ffmpeg_manager import (
@@ -173,18 +171,55 @@ class DropArea(QFrame):
 
         self.setObjectName("dropArea")
         self.setAcceptDrops(True)
-        self.setMinimumHeight(250)
+
+        # Keep a generous drop target before selection. Once a thumbnail is
+        # available, the frame is resized to match the video's aspect ratio.
+        self.empty_minimum_height = 350
+        self.thumbnail_padding = 12
+        self.setMinimumHeight(self.empty_minimum_height)
+
+        size_policy = QSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        size_policy.setHeightForWidth(True)
+        self.setSizePolicy(size_policy)
+
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.label = QLabel("Drag file or click to browse")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        # A QLabel normally uses its pixmap as its preferred size. Ignoring
+        # that hint prevents an enlarged thumbnail from becoming the window's
+        # new minimum size.
+        self.label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Ignored,
+        )
+        self.label.setMinimumSize(1, 1)
+
         self.thumbnail = None
+
+        # Avoid rebuilding a large, smoothly scaled pixmap for every individual
+        # mouse movement while the window is being resized.
+        self.thumbnail_resize_timer = QTimer(self)
+        self.thumbnail_resize_timer.setSingleShot(True)
+        self.thumbnail_resize_timer.setInterval(40)
+        self.thumbnail_resize_timer.timeout.connect(
+            self.display_thumbnail
+        )
 
         # This means the label will not intercept mouse clicks.
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(
+            self.thumbnail_padding,
+            self.thumbnail_padding,
+            self.thumbnail_padding,
+            self.thumbnail_padding,
+        )
         layout.addWidget(self.label)
 
         self.setStyleSheet("""
@@ -260,14 +295,71 @@ class DropArea(QFrame):
 
         try:
             self.thumbnail = create_video_thumbnail(file_path)
-            self.display_thumbnail()
+            self.update_thumbnail_height()
+            self.thumbnail_resize_timer.start(0)
 
         except (FileNotFoundError, ValueError) as error:
             self.thumbnail = None
+
+            # Undo a previous thumbnail's fixed height if the new preview
+            # could not be generated.
+            self.setMinimumHeight(self.empty_minimum_height)
+            self.setMaximumHeight(16777215)
+
             self.label.setText(Path(file_path).name)
             print(f"Could not create thumbnail: {error}")
 
         self.file_selected.emit(file_path)
+
+    def hasHeightForWidth(self):
+        """Tell Qt that this widget's height depends on its width."""
+
+        return self.thumbnail is not None and not self.thumbnail.isNull()
+
+    def heightForWidth(self, width):
+        """Return the frame height needed for the thumbnail and its padding."""
+
+        if self.thumbnail is None or self.thumbnail.isNull():
+            return self.empty_minimum_height
+
+        content_width = max(
+            1,
+            width - (self.thumbnail_padding * 2),
+        )
+
+        content_height = round(
+            content_width
+            * self.thumbnail.height()
+            / self.thumbnail.width()
+        )
+
+        return content_height + (self.thumbnail_padding * 2)
+
+    def sizeHint(self):
+        """Provide a useful initial height before the layout asks for one."""
+
+        hint = super().sizeHint()
+
+        if self.hasHeightForWidth():
+            hint.setHeight(
+                self.heightForWidth(max(1, self.width()))
+            )
+        else:
+            hint.setHeight(self.empty_minimum_height)
+
+        return hint
+
+    def update_thumbnail_height(self):
+        """Ask the layout to recalculate the frame from its aspect ratio."""
+
+        if not self.hasHeightForWidth():
+            return
+
+        # setFixedHeight() would cause recursive resize events. Height-for-width
+        # lets Qt calculate both dimensions together in one layout pass.
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
+        self.updateGeometry()
 
     def display_thumbnail(self):
         """Scale and clip the thumbnail to a rounded rectangle."""
@@ -307,7 +399,9 @@ class DropArea(QFrame):
         super().resizeEvent(event)
 
         if self.thumbnail is not None:
-            self.display_thumbnail()
+            # Restarting the single-shot timer postpones the expensive pixmap
+            # redraw until resizing pauses, keeping the window responsive.
+            self.thumbnail_resize_timer.start()
 
 
 class MainWindow(QMainWindow):
@@ -535,7 +629,9 @@ class MainWindow(QMainWindow):
 
         try:
             input_path = Path(self.selected_video)
-            output_path = create_output_path(input_path)
+            output_path = Path(
+                settings["output_path"]
+            )
 
             width, height = settings["resolution"]
 
