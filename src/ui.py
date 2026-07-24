@@ -20,10 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ffmpeg_runner import (
-    build_upscale_command,
-    create_output_path,
-)
+from ffmpeg_runner import build_upscale_command
 from settings_page import SettingsPage
 
 from ffmpeg_manager import (
@@ -632,7 +629,9 @@ class MainWindow(QMainWindow):
 
         try:
             input_path = Path(self.selected_video)
-            output_path = create_output_path(input_path)
+            output_path = Path(
+                settings["output_path"]
+            )
 
             width, height = settings["resolution"]
 

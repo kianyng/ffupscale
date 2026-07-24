@@ -14,23 +14,6 @@ ENCODING_PRESETS = {
     "slow",
 }
 
-def create_output_path(input_path):
-    """Create a unique output path beside the input video."""
-
-    input_path = Path(input_path)
-
-    output_path = input_path.with_name(f"{input_path.stem}_upscaled.mp4")
-
-    number = 2
-
-    while output_path.exists():
-        output_path = input_path.with_name(f"{input_path.stem}_upscaled_{number}.mp4")
-
-        number += 1
-
-    return output_path
-
-
 def build_upscale_command(
     input_path,
     output_path,
