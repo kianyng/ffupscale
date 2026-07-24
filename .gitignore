@@ -1,28 +1,44 @@
-# Python cache
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Build and packaging output
 build/
-build-onefile/
-build-folder/
+build-*/
 dist/
 release/
 release-folder/
 *.spec
-build-test/
-ffupscale-v0.1.0-beta.2-windows/
 *.zip
+*.7z
+*.rar
 
-# Large design source files
-*.psd
-*.psb
-*.png
+# Local design source files and exports
+assets/*.psd
+assets/*.psb
+assets/*.png
 
-# PyInstaller output
-build/
-dist/
-*.spec
+# Bundled FFmpeg executables are added locally when packaging
+vendor/ffmpeg/bin/*.exe
+
+# FFmpeg temporary, progress, and two-pass files
+ffmpeg2pass-*.log
+ffmpeg2pass-*.log.mbtree
+*.part
+*.tmp
+*_upscaled*.mp4
 
 # VS Code: ignore personal configuration but keep shared tasks
 .vscode/*
@@ -30,10 +46,13 @@ dist/
 
 # Other editors
 .idea/
+*.swp
+*.swo
 
-# FFmpeg temporary and two-pass files
-ffmpeg2pass-*.log
-ffmpeg2pass-*.log.mbtree
-*.part
+# Operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
 
-vendor/ffmpeg/bin/*.exe
+# Logs
+*.log
