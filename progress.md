@@ -21,4 +21,5 @@
 
 * Advanced quality options
 * Render queue
-* Trim tool
+* GPU encoding
+* Video Trimmer

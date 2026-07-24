@@ -46,6 +46,7 @@ Do not run the application directly from inside the ZIP or move
 - Target file size and compression
 - Additional hardware encoders
 - Render queue
+- Video trimmer
 
 [View development progress](progress.md)
 
