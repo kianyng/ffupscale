@@ -1,19 +1,10 @@
-import subprocess
 from pathlib import Path
 
 from ffmpeg_manager import find_ffmpeg
 
-QUALITY_CRF = {
-    "libx264": {
-        "balanced": 22,
-        "high": 18,
-        "near_lossless": 14,
-    },
-    "libx265": {
-        "balanced": 27,
-        "high": 22,
-        "near_lossless": 17,
-    },
+SUPPORTED_ENCODERS = {
+    "libx264",
+    "libx265",
 }
 
 # Only expose presets supported by both software encoders in the UI.
@@ -22,7 +13,6 @@ ENCODING_PRESETS = {
     "medium",
     "slow",
 }
-
 
 def create_output_path(input_path):
     """Create a unique output path beside the input video."""
@@ -46,7 +36,7 @@ def build_upscale_command(
     output_path,
     width,
     height,
-    quality="high",
+    quality=30,
     fps=None,
     encoder="libx264",
     preset="medium",
@@ -74,11 +64,23 @@ def build_upscale_command(
     if width % 2 != 0 or height % 2 != 0:
         raise ValueError("Width and height must both be even numbers.")
 
-    if encoder not in QUALITY_CRF:
-        raise ValueError(f"Unknown encoder: {encoder}")
+    if encoder not in SUPPORTED_ENCODERS:
+        raise ValueError(
+            f"Unknown encoder: {encoder}"
+        )
 
-    if quality not in QUALITY_CRF[encoder]:
-        raise ValueError(f"Unknown quality setting: {quality}")
+    if (
+        isinstance(quality, bool)
+        or not isinstance(quality, int)
+    ):
+        raise ValueError(
+            "Quality must be a whole number."
+        )
+
+    if not 1 <= quality <= 51:
+        raise ValueError(
+            "Quality must be between 1 and 51."
+        )
 
     if preset not in ENCODING_PRESETS:
         raise ValueError(f"Unknown encoding preset: {preset}")
@@ -86,7 +88,10 @@ def build_upscale_command(
     if fps is not None and fps <= 0:
         raise ValueError("FPS must be greater than zero.")
 
-    crf = QUALITY_CRF[encoder][quality]
+    # The UI uses higher numbers for better quality, while FFmpeg CRF
+    # uses lower numbers for better quality.
+
+    crf = 52 - quality
 
     arguments = [
         # Send machine-readable progress to stdout for the Qt progress bar.
@@ -135,43 +140,3 @@ def build_upscale_command(
     arguments.append(str(output_path))
 
     return ffmpeg_path, arguments
-
-
-def run_test_encode(
-    input_path,
-    width=3840,
-    height=2160,
-    quality="high",
-    fps=None,
-    encoder="libx264",
-    preset="medium",
-):
-    """
-    Run a blocking test encode independently of the GUI.
-    """
-
-    output_path = create_output_path(input_path)
-
-    ffmpeg_path, arguments = build_upscale_command(
-        input_path=input_path,
-        output_path=output_path,
-        width=width,
-        height=height,
-        quality=quality,
-        fps=fps,
-        encoder=encoder,
-        preset=preset,
-    )
-
-    print("FFmpeg command:")
-    print(subprocess.list2cmdline([ffmpeg_path, *arguments]))
-
-    print(f"\nOutput: {output_path}\n")
-
-    result = subprocess.run(
-        [ffmpeg_path, *arguments],
-        check=True,
-    )
-
-    return output_path, result.returncode
-

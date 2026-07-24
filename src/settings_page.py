@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QVBoxLayout,
     QWidget,
+    QSlider,
 )
 
 
@@ -142,19 +143,111 @@ class SettingsPage(QWidget):
 
         self.quality_box = QComboBox()
 
-        self.quality_box.addItem(
-            "Balanced",
-            "balanced",
+        # FFmpeg CRF quality control. Lower values preserve more quality but
+        # produce larger files.
+        self.quality_slider = QSlider(
+            Qt.Orientation.Horizontal
+        )
+        self.quality_slider.setRange(1, 51)
+        self.quality_slider.setValue(30)
+        self.quality_slider.setSingleStep(1)
+        self.quality_slider.setPageStep(5)
+
+        self.quality_slider.setToolTip(
+            "Higher values produce higher quality and larger files."
         )
 
-        self.quality_box.addItem(
-            "High",
-            "high",
+        self.quality_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                background-color: #3a3a3a;
+                height: 6px;
+                border-radius: 3px;
+            }
+
+            QSlider::sub-page:horizontal {
+                background-color: #3b82f6;
+                height: 6px;
+                border-radius: 3px;
+            }
+
+            QSlider::add-page:horizontal {
+                background-color: #3a3a3a;
+                height: 6px;
+                border-radius: 3px;
+            }
+
+            QSlider::handle:horizontal {
+                background-color: #ffffff;
+                width: 16px;
+                height: 16px;
+                margin: -5px 0;
+                border-radius: 8px;
+            }
+
+            QSlider::handle:horizontal:hover {
+                background-color: #dbeafe;
+            }
+
+            QSlider::handle:horizontal:pressed {
+                background-color: #3b82f6;
+            }
+        """)
+
+        self.quality_value = QLabel(
+            str(self.quality_slider.value())
+        )
+        self.quality_value.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+        self.quality_value.setMinimumWidth(25)
+
+        self.quality_slider.valueChanged.connect(
+            self.update_quality_display
         )
 
-        self.quality_box.addItem(
-            "Near-lossless",
-            "near_lossless",
+        quality_controls_layout = QHBoxLayout()
+        quality_controls_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+        quality_controls_layout.setSpacing(10)
+
+        quality_controls_layout.addWidget(
+            self.quality_slider,
+            stretch=1,
+        )
+        quality_controls_layout.addWidget(
+            self.quality_value
+        )
+
+        quality_help = QLabel(
+            "1: lowest quality · 30: balanced · 51: best quality"
+        )
+        quality_help.setStyleSheet("""
+            color: #999999;
+            font-size: 11px;
+        """)
+
+        quality_widget_layout = QVBoxLayout()
+        quality_widget_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+        quality_widget_layout.setSpacing(4)
+        quality_widget_layout.addLayout(
+            quality_controls_layout
+        )
+        quality_widget_layout.addWidget(
+            quality_help
+        )
+
+        self.quality_widget = QWidget()
+        self.quality_widget.setLayout(
+            quality_widget_layout
         )
 
         self.encoder_box = QComboBox()
@@ -216,7 +309,7 @@ class SettingsPage(QWidget):
 
         settings_form.addRow(
             "Quality:",
-            self.quality_box,
+            self.quality_widget,
         )
 
         settings_form.addRow(
@@ -389,6 +482,13 @@ class SettingsPage(QWidget):
 
         self.custom_fps.setVisible(custom_selected)
 
+    def update_quality_display(self, value):
+        """Display the currently selected CRF value."""
+
+        self.quality_value.setText(
+            str(value)
+        )
+
     def get_fps(self):
         """Return None to preserve FPS, or the selected numeric value."""
 
@@ -426,7 +526,7 @@ class SettingsPage(QWidget):
         return {
             "resolution": (width, height),
             "fps": self.get_fps(),
-            "quality": self.quality_box.currentData(),
+            "quality": self.quality_slider.value(),
             "encoder": self.encoder_box.currentData(),
             "preset": self.preset_box.currentData(),
         }
