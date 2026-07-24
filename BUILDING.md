@@ -51,8 +51,7 @@ release folder.
 
 ## Verify the package
 
-Test the package from `release-folder\ffupscale` on a computer without Python
-or FFmpeg installed. Confirm that:
+Test the package from `release-folder\ffupscale`. Confirm that:
 
 1. `ffupscale.exe` starts.
 2. Importing a video displays its properties and thumbnail.
@@ -64,7 +63,7 @@ or FFmpeg installed. Confirm that:
 ## Create the ZIP
 
 ```powershell
-Compress-Archive -Path release-folder\ffupscale -DestinationPath ffupscale-v0.1.0-beta.2-windows-x64.zip -Force
+Compress-Archive -Path release-folder\ffupscale -DestinationPath ffupscale-v0.1.0-beta.3-windows-x64.zip -Force
 ```
 
 Update the version in the ZIP filename for each release. Users must extract the
