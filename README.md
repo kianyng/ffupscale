@@ -39,10 +39,10 @@ Do not run the application directly from inside the ZIP or move
 - Live rendering progress
 - Render cancellation
 - Bundled FFmpeg and FFprobe in the packaged Windows build
+- Custom output location
 
 ## Planned features
 
-- Custom output location
 - Target file size and compression
 - Additional hardware encoders
 - Render queue
