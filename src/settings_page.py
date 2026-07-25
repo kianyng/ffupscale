@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QLineEdit,
     QMessageBox,
+    QCheckBox,
 )
 
 
@@ -255,12 +256,33 @@ class SettingsPage(QWidget):
             quality_widget_layout
         )
 
+        # Hardware encoders are supplied after background detection finishes.
+        self.hardware_encoders = {}
+
+        self.gpu_encoding_checkbox = QCheckBox(
+            "Use GPU encoding"
+        )
+        self.gpu_encoding_checkbox.setEnabled(False)
+        self.gpu_encoding_checkbox.setToolTip(
+            "Checking for supported hardware encoders."
+        )
+
+        self.gpu_status = QLabel(
+            "Detecting GPU encoding support..."
+        )
+        self.gpu_status.setStyleSheet("""
+            color: #999999;
+            font-size: 11px;
+        """)
+
         self.encoder_box = QComboBox()
 
-        self.encoder_box.addItem(
-            "H.264 — best compatibility",
-            "libx264",
+        self.gpu_encoding_checkbox.toggled.connect(
+            self.update_encoder_options
         )
+
+        # Start with CPU encoders while detection runs.
+        self.update_encoder_options()
 
         self.encoder_box.addItem(
             "H.265 — smaller files",
@@ -374,6 +396,16 @@ class SettingsPage(QWidget):
         settings_form.addRow(
             "Quality:",
             self.quality_widget,
+        )
+
+        settings_form.addRow(
+            "",
+            self.gpu_encoding_checkbox,
+        )
+
+        settings_form.addRow(
+            "GPU support:",
+            self.gpu_status,
         )
 
         settings_form.addRow(
@@ -802,3 +834,135 @@ class SettingsPage(QWidget):
 
         percentage = max(0, min(100, int(percentage)))
         self.progress_bar.setValue(percentage)
+
+    def set_hardware_encoders(self, encoders):
+        """Store detected hardware encoders and update the GPU controls."""
+
+        self.hardware_encoders = encoders
+
+        if not encoders:
+            self.gpu_encoding_checkbox.setChecked(
+                False
+            )
+            self.gpu_encoding_checkbox.setEnabled(
+                False
+            )
+            self.gpu_encoding_checkbox.setToolTip(
+                "No usable GPU encoder was detected."
+            )
+            self.gpu_status.setText(
+                "No supported GPU encoder detected"
+            )
+
+        else:
+            vendor_names = {
+                "nvidia": "NVIDIA",
+                "amd": "AMD",
+                "intel": "Intel",
+            }
+
+            detected_vendors = [
+                vendor_names.get(vendor, vendor.title())
+                for vendor in encoders
+            ]
+
+            vendor_text = ", ".join(detected_vendors)
+
+            self.gpu_encoding_checkbox.setEnabled(
+                True
+            )
+            self.gpu_encoding_checkbox.setToolTip(
+                f"Use the detected {vendor_text} GPU encoder."
+            )
+            self.gpu_status.setText(
+                f"{vendor_text} hardware encoding available"
+            )
+
+        self.update_encoder_options()
+
+
+    def update_encoder_options(self):
+        """Show CPU or detected hardware encoders."""
+
+        previous_encoder = (
+            self.encoder_box.currentData()
+        )
+
+        # Try to preserve whether the user selected H.264 or H.265.
+        if previous_encoder in {
+            "libx265",
+            "hevc_nvenc",
+            "hevc_amf",
+            "hevc_qsv",
+        }:
+            previous_codec = "h265"
+        else:
+            previous_codec = "h264"
+
+        self.encoder_box.blockSignals(True)
+        self.encoder_box.clear()
+
+        use_gpu = (
+            self.gpu_encoding_checkbox.isChecked()
+            and bool(self.hardware_encoders)
+        )
+
+        if use_gpu:
+            vendor_names = {
+                "nvidia": "NVIDIA NVENC",
+                "amd": "AMD AMF",
+                "intel": "Intel Quick Sync",
+            }
+
+            for vendor, codecs in (
+                self.hardware_encoders.items()
+            ):
+                vendor_label = vendor_names.get(
+                    vendor,
+                    vendor.title(),
+                )
+
+                if "h264" in codecs:
+                    self.encoder_box.addItem(
+                        f"H.264 — {vendor_label}",
+                        codecs["h264"],
+                    )
+
+                if "h265" in codecs:
+                    self.encoder_box.addItem(
+                        f"H.265 — {vendor_label}",
+                        codecs["h265"],
+                    )
+
+        else:
+            self.encoder_box.addItem(
+                "H.264 — CPU, best compatibility",
+                "libx264",
+            )
+            self.encoder_box.addItem(
+                "H.265 — CPU, smaller files",
+                "libx265",
+            )
+
+        # Restore the previously selected codec where possible.
+        for index in range(
+            self.encoder_box.count()
+        ):
+            encoder = self.encoder_box.itemData(index)
+
+            encoder_codec = (
+                "h265"
+                if encoder in {
+                    "libx265",
+                    "hevc_nvenc",
+                    "hevc_amf",
+                    "hevc_qsv",
+                }
+                else "h264"
+            )
+
+            if encoder_codec == previous_codec:
+                self.encoder_box.setCurrentIndex(index)
+                break
+
+        self.encoder_box.blockSignals(False)

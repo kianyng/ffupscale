@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from PyQt6.QtCore import QProcess, QRectF, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import (QProcess, QRectF, QTimer, Qt, pyqtSignal, QObject, QThread, pyqtSlot,)
 from PyQt6.QtGui import QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -21,11 +21,13 @@ from PyQt6.QtWidgets import (
 )
 
 from ffmpeg_runner import build_upscale_command
+
 from settings_page import SettingsPage
 
 from ffmpeg_manager import (
     find_ffmpeg,
     find_ffprobe,
+    detect_hardware_encoders,
 )
 
 # Prevent FFmpeg and FFprobe from opening console windows on Windows.
@@ -404,6 +406,26 @@ class DropArea(QFrame):
             self.thumbnail_resize_timer.start()
 
 
+class EncoderDetectionWorker(QObject):
+    """Detect hardware encoders without blocking the interface."""
+
+    detected = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            encoders = detect_hardware_encoders()
+            self.detected.emit(encoders)
+
+        except (
+            FileNotFoundError,
+            OSError,
+            subprocess.SubprocessError,
+        ) as error:
+            self.failed.emit(str(error))
+
+
 class MainWindow(QMainWindow):
     """Coordinate video selection, navigation, and FFmpeg rendering."""
 
@@ -513,6 +535,8 @@ class MainWindow(QMainWindow):
 
         # Second screen, imported from settings_page.py
         self.settings_page = SettingsPage()
+
+        self.start_encoder_detection()
 
         self.ffmpeg_process = QProcess(self)
         self.ffmpeg_log = ""
@@ -789,3 +813,62 @@ class MainWindow(QMainWindow):
 
         # FFmpeg listens for "q" and stops cleanly.
         self.ffmpeg_process.write(b"q\n")
+
+    def start_encoder_detection(self):
+        """Run hardware encoder detection in a worker thread."""
+
+        self.encoder_detection_thread = QThread(
+            self
+        )
+
+        self.encoder_detection_worker = (
+            EncoderDetectionWorker()
+        )
+
+        self.encoder_detection_worker.moveToThread(
+            self.encoder_detection_thread
+        )
+
+        self.encoder_detection_thread.started.connect(
+            self.encoder_detection_worker.run
+        )
+
+        self.encoder_detection_worker.detected.connect(
+            self.settings_page.set_hardware_encoders
+        )
+
+        self.encoder_detection_worker.failed.connect(
+            self.encoder_detection_failed
+        )
+
+        self.encoder_detection_worker.detected.connect(
+            self.encoder_detection_thread.quit
+        )
+
+        self.encoder_detection_worker.failed.connect(
+            self.encoder_detection_thread.quit
+        )
+
+        self.encoder_detection_worker.detected.connect(
+            self.encoder_detection_worker.deleteLater
+        )
+
+        self.encoder_detection_worker.failed.connect(
+            self.encoder_detection_worker.deleteLater
+        )
+
+        self.encoder_detection_thread.finished.connect(
+            self.encoder_detection_thread.deleteLater
+        )
+
+        self.encoder_detection_thread.start()
+
+
+    def encoder_detection_failed(self, message):
+        """Fall back to CPU encoding if detection fails."""
+
+        print(
+            f"Hardware encoder detection failed: {message}"
+        )
+
+        self.settings_page.set_hardware_encoders({})
