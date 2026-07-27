@@ -7,6 +7,8 @@ from typing import Optional
 from uuid import uuid4
 
 
+# -- Render Status --
+
 class RenderStatus(str, Enum):
     """Possible states for a queued render."""
 
@@ -16,6 +18,8 @@ class RenderStatus(str, Enum):
     FAILED = "Failed"
     CANCELLED = "Cancelled"
 
+
+# -- Render Job --
 
 @dataclass
 class RenderJob:
@@ -67,6 +71,8 @@ class RenderJob:
             duration=duration,
         )
 
+    # -- Display Helpers --
+
     @property
     def filename(self):
         """Return the input filename for display in the queue."""
@@ -84,6 +90,8 @@ class RenderJob:
             0,
             min(100, int(percentage)),
         )
+
+    # -- Status Updates --
 
     def mark_waiting(self):
         self.status = RenderStatus.WAITING

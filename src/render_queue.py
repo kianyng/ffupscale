@@ -1,11 +1,15 @@
 from render_job import RenderJob, RenderStatus
 
 
+# -- Render Queue --
+
 class RenderQueue:
     """Manage an ordered, sequential collection of render jobs."""
 
     def __init__(self):
         self.jobs = []
+
+    # -- Queue Inspection --
 
     @property
     def active_job(self):
@@ -16,6 +20,8 @@ class RenderQueue:
                 return job
 
         return None
+
+    # -- Queue Modification --
 
     def add(self, job):
         """Add a waiting job to the end of the queue."""
@@ -103,6 +109,8 @@ class RenderQueue:
             job,
         )
 
+    # -- Queue Execution --
+
     def start_job(self, job):
         """Mark one waiting job as the active render."""
 
@@ -122,6 +130,8 @@ class RenderQueue:
             )
 
         job.mark_rendering()
+
+    # -- Queue Cleanup and Counts --
 
     def clear_completed(self):
         """Remove completed jobs while keeping all other jobs."""

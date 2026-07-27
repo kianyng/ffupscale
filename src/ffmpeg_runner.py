@@ -2,12 +2,16 @@ from pathlib import Path
 
 from ffmpeg_manager import find_ffmpeg
 
+# -- Shared Encoding Speeds --
+
 ENCODING_SPEEDS = {
     "fast",
     "medium",
     "slow",
 }
 
+
+# -- Encoder Profiles --
 
 ENCODER_PROFILES = {
     # CPU encoders
@@ -111,6 +115,8 @@ ENCODER_PROFILES = {
 SUPPORTED_ENCODERS = set(ENCODER_PROFILES)
 
 
+# -- Encoder Arguments --
+
 def build_video_encoder_arguments(
     encoder,
     quality,
@@ -195,6 +201,8 @@ def build_video_encoder_arguments(
 
     return arguments
 
+
+# -- FFmpeg Command --
 
 def build_upscale_command(
     input_path,

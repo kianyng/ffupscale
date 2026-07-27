@@ -2,8 +2,23 @@ import json
 import subprocess
 from pathlib import Path
 
-from PyQt6.QtCore import (QProcess, QRectF, QTimer, Qt, pyqtSignal, QObject, QThread, pyqtSlot, QUrl,)
-from PyQt6.QtGui import QPainter, QPainterPath, QPixmap, QDesktopServices
+from PyQt6.QtCore import (
+    QObject,
+    QProcess,
+    QRectF,
+    QThread,
+    QTimer,
+    Qt,
+    QUrl,
+    pyqtSignal,
+    pyqtSlot,
+)
+from PyQt6.QtGui import (
+    QDesktopServices,
+    QPainter,
+    QPainterPath,
+    QPixmap,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -41,7 +56,7 @@ SUBPROCESS_FLAGS = getattr(
     0,
 )
 
-# Video inspection helpers
+# -- Video Inspection Helpers --
 
 
 def read_video_properties(file_path):
@@ -164,8 +179,10 @@ def create_video_thumbnail(file_path):
     return thumbnail
 
 
-# User interface
+# -- User Interface --
 
+
+# -- Video Drop Area --
 
 class DropArea(QFrame):
     """Clickable drag-and-drop target that previews the selected video."""
@@ -411,6 +428,8 @@ class DropArea(QFrame):
             self.thumbnail_resize_timer.start()
 
 
+# -- Hardware Detection Worker --
+
 class EncoderDetectionWorker(QObject):
     """Detect hardware encoders without blocking the interface."""
 
@@ -430,6 +449,8 @@ class EncoderDetectionWorker(QObject):
         ) as error:
             self.failed.emit(str(error))
 
+
+# -- Main Window --
 
 class MainWindow(QMainWindow):
     """Coordinate video selection, navigation, and FFmpeg rendering."""
@@ -624,6 +645,8 @@ class MainWindow(QMainWindow):
             self.handle_queue_job_action
         )
 
+    # -- Video Selection and Navigation --
+
     def video_selected(self, file_path):
         """Read video metadata and populate the summary page."""
 
@@ -697,6 +720,8 @@ class MainWindow(QMainWindow):
             message,
         )
 
+    # -- Immediate Rendering --
+
     def start_render(self, settings):
         """Create and immediately start a single render job."""
 
@@ -736,6 +761,8 @@ class MainWindow(QMainWindow):
             ValueError,
         ) as error:
             self.show_error(str(error))
+
+    # -- FFmpeg Output and Progress --
 
     def read_ffmpeg_output(self):
         """Collect FFmpeg diagnostics from stderr for error reporting."""
@@ -815,6 +842,8 @@ class MainWindow(QMainWindow):
                         self.current_job,
                         has_active_job=True,
                     )
+
+    # -- Render Completion and Cancellation --
 
     def render_finished(
         self,
@@ -901,6 +930,8 @@ class MainWindow(QMainWindow):
         # FFmpeg listens for "q" and stops cleanly.
         self.ffmpeg_process.write(b"q\n")
 
+    # -- Hardware Encoder Detection --
+
     def start_encoder_detection(self):
         """Run hardware encoder detection in a worker thread."""
 
@@ -959,6 +990,8 @@ class MainWindow(QMainWindow):
         )
 
         self.settings_page.set_hardware_encoders({})
+
+    # -- Render Queue --
 
     def add_to_queue(self, settings):
         """Add the selected video without starting it."""

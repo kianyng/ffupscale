@@ -5,6 +5,8 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
+# -- Hardware Encoder Definitions --
+
 HARDWARE_ENCODERS = {
     "nvidia": {
         "h264": "h264_nvenc",
@@ -19,6 +21,8 @@ HARDWARE_ENCODERS = {
         "h265": "hevc_qsv",
     },
 }
+
+# -- FFmpeg Paths --
 
 def bundled_bin_directory():
     """
@@ -95,6 +99,8 @@ def ffmpeg_is_available():
         and find_program("ffprobe") is not None
     )
 
+# -- Process Helpers --
+
 def hidden_process_flags():
     """Prevent FFmpeg subprocesses from opening a console on Windows."""
 
@@ -103,6 +109,8 @@ def hidden_process_flags():
 
     return 0
 
+
+# -- Hardware Encoder Detection --
 
 @lru_cache(maxsize=1)
 def get_compiled_video_encoders():

@@ -13,6 +13,8 @@ from PyQt6.QtWidgets import (
 from render_job import RenderStatus
 
 
+# -- Queue Styling --
+
 STATUS_COLOURS = {
     RenderStatus.WAITING: "#999999",
     RenderStatus.RENDERING: "#3b82f6",
@@ -21,6 +23,8 @@ STATUS_COLOURS = {
     RenderStatus.CANCELLED: "#f59e0b",
 }
 
+
+# -- Queue Job Row --
 
 class QueueJobRow(QFrame):
     """Display one render job and its available actions."""
@@ -200,6 +204,8 @@ class QueueJobRow(QFrame):
             )
             self.action_button.setEnabled(True)
 
+
+# -- Queue Page --
 
 class QueuePage(QWidget):
     """Display and control the complete render queue."""

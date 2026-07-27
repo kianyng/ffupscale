@@ -21,6 +21,8 @@ from PyQt6.QtWidgets import (
 )
 
 
+# -- Settings Page --
+
 class SettingsPage(QWidget):
     """Collect encoding settings and report user actions to MainWindow."""
 
@@ -33,9 +35,12 @@ class SettingsPage(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.is_rendering = False
+        # -- Page State --
 
+        self.is_rendering = False
         self.input_path = None
+
+        # -- Page Header --
 
         title = QLabel("Upscale settings")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -46,6 +51,8 @@ class SettingsPage(QWidget):
 
         self.video_name = QLabel("No video selected")
         self.video_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # -- Resolution Settings --
 
         self.resolution_box = QComboBox()
         # Item data holds the actual dimensions used by FFmpeg.
@@ -105,6 +112,8 @@ class SettingsPage(QWidget):
 
         self.custom_resolution_label = QLabel("Custom resolution:")
 
+        # -- Frame Rate Settings --
+
         self.fps_box = QComboBox()
         # String sentinels distinguish special options from numeric frame rates.
         self.fps_box.addItem(
@@ -148,10 +157,12 @@ class SettingsPage(QWidget):
 
         self.fps_box.currentIndexChanged.connect(self.update_custom_fps_visibility)
 
+        # -- Quality Settings --
+
         self.quality_box = QComboBox()
 
-        # FFmpeg CRF quality control. Lower values preserve more quality but
-        # produce larger files.
+        # The UI presents higher values as better quality. The FFmpeg backend
+        # translates this value for the selected CPU or hardware encoder.
         self.quality_slider = QSlider(
             Qt.Orientation.Horizontal
         )
@@ -257,6 +268,8 @@ class SettingsPage(QWidget):
             quality_widget_layout
         )
 
+        # -- Encoder Settings --
+
         # Hardware encoders are supplied after background detection finishes.
         self.hardware_encoders = {}
 
@@ -308,6 +321,8 @@ class SettingsPage(QWidget):
         )
 
         self.preset_box.setCurrentIndex(1)
+
+        # -- Output Settings --
 
         # Output folder
         self.output_folder_edit = QLineEdit()
@@ -367,6 +382,8 @@ class SettingsPage(QWidget):
         self.output_filename_edit.textChanged.connect(
             self.update_output_path_preview
         )
+
+        # -- Settings Form --
 
         settings_form = QFormLayout()
         settings_form.setVerticalSpacing(20)
@@ -517,6 +534,8 @@ class SettingsPage(QWidget):
             False
         )
 
+        # -- Page Actions --
+
         self.back_button = QPushButton("Back")
 
         self.back_button.clicked.connect(self.back_requested.emit)
@@ -601,6 +620,8 @@ class SettingsPage(QWidget):
 
         self.update_custom_resolution_visibility()
         self.update_custom_fps_visibility()
+
+    # -- Video and Output Selection --
 
     def set_video(self, file_path):
         """Display the input and suggest an output location."""
@@ -750,6 +771,8 @@ class SettingsPage(QWidget):
 
         return output_path
 
+    # -- Setting Values and Visibility --
+
     def update_custom_resolution_visibility(self):
         """Show custom dimensions only when Custom is selected."""
 
@@ -817,6 +840,8 @@ class SettingsPage(QWidget):
             "preset": self.preset_box.currentData(),
             "output_path": self.get_output_path(),
         }
+
+    # -- Render Requests and Progress --
 
     def request_render(self):
         """Treat the primary button as Render or Cancel based on page state."""
@@ -891,6 +916,8 @@ class SettingsPage(QWidget):
 
         percentage = max(0, min(100, int(percentage)))
         self.progress_bar.setValue(percentage)
+
+    # -- Hardware Encoder Options --
 
     def set_hardware_encoders(self, encoders):
         """Store detected hardware encoders and update the GPU controls."""
