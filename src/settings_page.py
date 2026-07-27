@@ -28,6 +28,7 @@ class SettingsPage(QWidget):
     back_requested = pyqtSignal()
     render_requested = pyqtSignal(dict)
     cancel_requested = pyqtSignal()
+    queue_requested = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
@@ -540,6 +541,22 @@ class SettingsPage(QWidget):
 
         self.render_button.clicked.connect(self.request_render)
 
+        self.queue_button = QPushButton(
+            "Add to queue"
+        )
+
+        self.queue_button.setStyleSheet("""
+            QPushButton {
+                font-size: 15px;
+                font-weight: bold;
+                padding: 8px;
+            }
+        """)
+
+        self.queue_button.clicked.connect(
+            self.request_queue
+        )
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -548,8 +565,21 @@ class SettingsPage(QWidget):
         self.progress_bar.hide()
 
         button_layout = QHBoxLayout()
-        button_layout.addWidget(self.back_button, stretch=1)
-        button_layout.addWidget(self.render_button, stretch=1)
+
+        button_layout.addWidget(
+            self.back_button,
+            stretch=1,
+        )
+
+        button_layout.addWidget(
+            self.queue_button,
+            stretch=1,
+        )
+
+        button_layout.addWidget(
+            self.render_button,
+            stretch=1,
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 20, 30, 30)
@@ -806,21 +836,48 @@ class SettingsPage(QWidget):
                 str(error),
             )
 
+    def request_queue(self):
+        """Validate the settings and request a new queued job."""
+
+        if self.is_rendering:
+            return
+
+        try:
+            settings = self.get_settings()
+            self.queue_requested.emit(settings)
+
+        except ValueError as error:
+            QMessageBox.warning(
+                self,
+                "Invalid settings",
+                str(error),
+            )
+
     def set_rendering(self, rendering):
         """Update controls when an FFmpeg process starts or stops."""
 
         self.is_rendering = rendering
-        self.back_button.setEnabled(not rendering)
+        self.back_button.setEnabled(
+            not rendering
+        )
+        self.queue_button.setEnabled(
+            not rendering
+        )
 
         if rendering:
-            self.render_button.setText("Cancel")
+            self.render_button.setText(
+                "Cancel"
+            )
             self.render_button.setEnabled(True)
 
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat("%p%")
             self.progress_bar.show()
+
         else:
-            self.render_button.setText("Render")
+            self.render_button.setText(
+                "Render"
+            )
             self.render_button.setEnabled(True)
 
     def set_cancelling(self):

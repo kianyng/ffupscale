@@ -2,8 +2,8 @@ import json
 import subprocess
 from pathlib import Path
 
-from PyQt6.QtCore import (QProcess, QRectF, QTimer, Qt, pyqtSignal, QObject, QThread, pyqtSlot,)
-from PyQt6.QtGui import QPainter, QPainterPath, QPixmap
+from PyQt6.QtCore import (QProcess, QRectF, QTimer, Qt, pyqtSignal, QObject, QThread, pyqtSlot, QUrl,)
+from PyQt6.QtGui import QPainter, QPainterPath, QPixmap, QDesktopServices
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -29,6 +29,10 @@ from ffmpeg_manager import (
     find_ffprobe,
     detect_hardware_encoders,
 )
+
+from queue_page import QueuePage
+from render_job import RenderJob, RenderStatus
+from render_queue import RenderQueue
 
 # Prevent FFmpeg and FFprobe from opening console windows on Windows.
 SUBPROCESS_FLAGS = getattr(
@@ -243,6 +247,7 @@ class DropArea(QFrame):
                 font-size: 20px;
             }
         """)
+
 
     def mousePressEvent(self, event):
         """Open the file picker when the drop area is clicked."""
@@ -501,11 +506,24 @@ class MainWindow(QMainWindow):
             }
         """)
 
+        self.queue_view_button = QPushButton(
+            "Queue (0)"
+        )
+
+        self.queue_view_button.setStyleSheet("""
+            QPushButton {
+                font-size: 15px;
+                font-weight: bold;
+                padding: 8px;
+            }
+        """)
+
         # Right side: properties followed by Continue button
         right_layout = QVBoxLayout()
         right_layout.addLayout(properties_layout)
         right_layout.addStretch()
         right_layout.addWidget(self.continue_button)
+        right_layout.addWidget(self.queue_view_button)
 
         # Drop area on the left, information on the right
         content_layout = QHBoxLayout()
@@ -536,6 +554,12 @@ class MainWindow(QMainWindow):
         # Second screen, imported from settings_page.py
         self.settings_page = SettingsPage()
 
+        self.render_queue = RenderQueue()
+        self.queue_running = False
+        self.current_job = None
+
+        self.queue_page = QueuePage()
+
         self.start_encoder_detection()
 
         self.ffmpeg_process = QProcess(self)
@@ -556,6 +580,7 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.pages.addWidget(self.file_page)
         self.pages.addWidget(self.settings_page)
+        self.pages.addWidget(self.queue_page)
 
         self.setCentralWidget(self.pages)
 
@@ -566,6 +591,38 @@ class MainWindow(QMainWindow):
         self.settings_page.render_requested.connect(self.start_render)
 
         self.settings_page.cancel_requested.connect(self.cancel_render)
+
+        self.settings_page.queue_requested.connect(
+            self.add_to_queue
+        )
+
+        self.queue_view_button.clicked.connect(
+            self.open_queue_page
+        )
+
+        self.queue_page.back_requested.connect(
+            self.open_file_page
+        )
+
+        self.queue_page.remove_job_requested.connect(
+            self.remove_queue_job
+        )
+
+        self.queue_page.clear_completed_requested.connect(
+            self.clear_completed_jobs
+        )
+
+        self.queue_page.start_queue_requested.connect(
+            self.start_queue
+        )
+
+        self.queue_page.stop_queue_requested.connect(
+            self.stop_queue
+        )
+
+        self.queue_page.job_action_requested.connect(
+            self.handle_queue_job_action
+        )
 
     def video_selected(self, file_path):
         """Read video metadata and populate the summary page."""
@@ -641,48 +698,35 @@ class MainWindow(QMainWindow):
         )
 
     def start_render(self, settings):
-        """Build the command and start FFmpeg asynchronously."""
+        """Create and immediately start a single render job."""
 
-        if self.selected_video is None:
-            self.show_error("Select a video first.")
-            return
-
-        if self.ffmpeg_process.state() != QProcess.ProcessState.NotRunning:
-            self.show_error("A video is already being rendered.")
+        if (
+            self.ffmpeg_process.state()
+            != QProcess.ProcessState.NotRunning
+        ):
+            self.show_error(
+                "A video is already being rendered."
+            )
             return
 
         try:
-            input_path = Path(self.selected_video)
-            output_path = Path(
-                settings["output_path"]
+            job = self.create_render_job(
+                settings
             )
 
-            width, height = settings["resolution"]
-
-            ffmpeg_path, arguments = build_upscale_command(
-                input_path=input_path,
-                output_path=output_path,
-                width=width,
-                height=height,
-                quality=settings["quality"],
-                fps=settings["fps"],
-                encoder=settings["encoder"],
-                preset=settings["preset"],
+            self.render_queue.add(job)
+            self.render_queue.move_to_next(
+                job.job_id
             )
 
-            self.current_output_path = output_path
-            self.ffmpeg_log = ""
-            self.progress_buffer = ""
-            self.render_was_cancelled = False
+            # Render only this job. Waiting queue jobs will not
+            # automatically continue unless Start queue is pressed.
+            self.queue_running = False
 
-            self.settings_page.set_rendering(True)
+            self.start_job(job)
 
-            print("Starting FFmpeg:")
-            print(subprocess.list2cmdline([ffmpeg_path, *arguments]))
-
-            self.ffmpeg_process.start(
-                ffmpeg_path,
-                arguments,
+            self.pages.setCurrentWidget(
+                self.queue_page
             )
 
         except (
@@ -691,7 +735,6 @@ class MainWindow(QMainWindow):
             TypeError,
             ValueError,
         ) as error:
-            self.reset_render_button()
             self.show_error(str(error))
 
     def read_ffmpeg_output(self):
@@ -731,67 +774,111 @@ class MainWindow(QMainWindow):
                 try:
                     processed_seconds = int(value) / 1_000_000
 
-                    if self.video_duration > 0:
-                        percentage = processed_seconds / self.video_duration * 100
+                    if (
+                        self.current_job is not None
+                        and self.current_job.duration > 0
+                    ):
+                        percentage = (
+                            processed_seconds
+                            / self.current_job.duration
+                            * 100
+                        )
 
-                        self.settings_page.set_progress(percentage)
+                        self.current_job.set_progress(
+                            percentage
+                        )
+
+                        self.settings_page.set_progress(
+                            percentage
+                        )
+
+                        self.queue_page.update_job(
+                            self.current_job,
+                            has_active_job=True,
+                        )
 
                 except ValueError:
                     pass
 
-            elif key == "progress" and value == "end":
-                self.settings_page.set_progress(100)
+            elif (
+                key == "progress"
+                and value == "end"
+            ):
+                if self.current_job is not None:
+                    self.current_job.set_progress(100)
+
+                    self.settings_page.set_progress(
+                        100
+                    )
+
+                    self.queue_page.update_job(
+                        self.current_job,
+                        has_active_job=True,
+                    )
 
     def render_finished(
         self,
         exit_code,
         exit_status,
     ):
-        """Restore controls and report cancellation, success, or failure."""
+        """Finish the current job and optionally continue the queue."""
 
-        was_cancelled = self.render_was_cancelled
+        job = self.current_job
+        was_cancelled = (
+            self.render_was_cancelled
+        )
 
-        self.reset_render_button()
+        self.current_job = None
+        self.settings_page.set_rendering(False)
 
-        if was_cancelled:
-            QMessageBox.information(
-                self,
-                "Render cancelled",
-                (
-                    "Rendering was cancelled."
-                    "\n\nA partial output file may remain at:"
-                    f"\n{self.current_output_path}"
-                ),
-            )
+        if job is None:
             return
 
-        if (
-            exit_code == 0
-            and self.current_output_path is not None
-            and self.current_output_path.is_file()
-        ):
-            self.settings_page.set_progress(100)
+        if was_cancelled:
+            job.mark_cancelled()
 
-            QMessageBox.information(
-                self,
-                "Render complete",
-                (
-                    "The video was rendered successfully."
-                    f"\n\n{self.current_output_path}"
-                ),
-            )
+        elif (
+            exit_code == 0
+            and job.output_path.is_file()
+        ):
+            job.mark_completed()
 
         else:
-            error_message = f"FFmpeg exited with code {exit_code}."
+            error_lines = (
+                self.ffmpeg_log
+                .strip()
+                .splitlines()
+            )
 
-            if self.ffmpeg_log:
-                error_lines = self.ffmpeg_log.strip().splitlines()
+            final_lines = error_lines[-10:]
 
-                final_lines = error_lines[-10:]
+            error_message = (
+                f"FFmpeg exited with code "
+                f"{exit_code}."
+            )
 
-                error_message += "\n\n" + "\n".join(final_lines)
+            if final_lines:
+                error_message += (
+                    "\n\n"
+                    + "\n".join(final_lines)
+                )
 
-            self.show_error(error_message)
+            job.mark_failed(error_message)
+
+            if not self.queue_running:
+                self.show_error(
+                    error_message
+                )
+
+        self.refresh_queue_page()
+
+        if self.queue_running:
+            # Let the finished signal return before starting
+            # another process with the same QProcess.
+            QTimer.singleShot(
+                0,
+                self.start_next_queue_job,
+            )
 
     def process_error(self, process_error):
         if process_error == QProcess.ProcessError.FailedToStart:
@@ -872,3 +959,306 @@ class MainWindow(QMainWindow):
         )
 
         self.settings_page.set_hardware_encoders({})
+
+    def add_to_queue(self, settings):
+        """Add the selected video without starting it."""
+
+        try:
+            job = self.create_render_job(
+                settings
+            )
+
+            self.render_queue.add(job)
+            self.refresh_queue_page()
+
+            self.pages.setCurrentWidget(
+                self.queue_page
+            )
+
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as error:
+            self.show_error(str(error))
+
+
+    def open_queue_page(self):
+        """Show the render queue."""
+
+        self.refresh_queue_page()
+
+        self.pages.setCurrentWidget(
+            self.queue_page
+        )
+
+
+    def refresh_queue_page(self):
+        """Refresh queue rows and the queue count button."""
+
+        self.queue_page.set_jobs(
+            self.render_queue.jobs,
+            queue_running=self.queue_running,
+        )
+
+        self.queue_view_button.setText(
+            f"Queue ({len(self.render_queue.jobs)})"
+        )
+
+
+    def remove_queue_job(self, job_id):
+        """Remove a non-rendering job."""
+
+        try:
+            self.render_queue.remove(job_id)
+            self.refresh_queue_page()
+
+        except ValueError as error:
+            self.show_error(str(error))
+
+
+    def clear_completed_jobs(self):
+        """Remove completed jobs from queue history."""
+
+        self.render_queue.clear_completed()
+        self.refresh_queue_page()
+
+
+    def create_render_job(self, settings):
+        """Create and validate a job from the current selection."""
+
+        if self.selected_video is None:
+            raise ValueError(
+                "Select a video first."
+            )
+
+        job = RenderJob.from_settings(
+            input_path=self.selected_video,
+            duration=self.video_duration,
+            settings=settings,
+        )
+
+        new_output = job.output_path.resolve()
+
+        for existing_job in self.render_queue.jobs:
+            if (
+                existing_job.output_path.resolve()
+                == new_output
+            ):
+                raise ValueError(
+                    "Another queued video already "
+                    "uses this output path."
+                )
+
+        return job
+
+
+    def start_job(self, job):
+        """Start one RenderJob using the shared FFmpeg process."""
+
+        if (
+            self.ffmpeg_process.state()
+            != QProcess.ProcessState.NotRunning
+        ):
+            raise RuntimeError(
+                "Another video is already rendering."
+            )
+
+        try:
+            self.render_queue.start_job(job)
+
+            ffmpeg_path, arguments = (
+                build_upscale_command(
+                    input_path=job.input_path,
+                    output_path=job.output_path,
+                    width=job.width,
+                    height=job.height,
+                    quality=job.quality,
+                    fps=job.fps,
+                    encoder=job.encoder,
+                    preset=job.preset,
+                )
+            )
+
+            self.current_job = job
+            self.current_output_path = (
+                job.output_path
+            )
+
+            self.ffmpeg_log = ""
+            self.progress_buffer = ""
+            self.render_was_cancelled = False
+
+            self.settings_page.set_rendering(
+                True
+            )
+
+            self.refresh_queue_page()
+
+            print("Starting FFmpeg:")
+            print(
+                subprocess.list2cmdline(
+                    [ffmpeg_path, *arguments]
+                )
+            )
+
+            self.ffmpeg_process.start(
+                ffmpeg_path,
+                arguments,
+            )
+
+        except (
+            FileNotFoundError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as error:
+            job.mark_failed(str(error))
+            self.current_job = None
+
+            self.settings_page.set_rendering(
+                False
+            )
+            self.refresh_queue_page()
+
+            self.show_error(str(error))
+
+
+    def start_queue(self):
+        """Start or resume sequential queue processing."""
+
+        self.queue_running = True
+        self.refresh_queue_page()
+
+        if (
+            self.ffmpeg_process.state()
+            == QProcess.ProcessState.NotRunning
+        ):
+            self.start_next_queue_job()
+
+
+    def stop_queue(self):
+        """
+        Stop automatic queue progression.
+
+        The active render is allowed to finish.
+        """
+
+        self.queue_running = False
+        self.refresh_queue_page()
+
+
+    def start_next_queue_job(self):
+        """Start the first waiting job."""
+
+        if not self.queue_running:
+            return
+
+        if (
+            self.ffmpeg_process.state()
+            != QProcess.ProcessState.NotRunning
+        ):
+            return
+
+        next_job = (
+            self.render_queue.next_waiting_job()
+        )
+
+        if next_job is None:
+            self.queue_running = False
+            self.refresh_queue_page()
+
+            QMessageBox.information(
+                self,
+                "Queue complete",
+                "All queued videos have finished.",
+            )
+            return
+
+        self.start_job(next_job)
+
+
+    def handle_queue_job_action(
+        self,
+        job_id,
+    ):
+        """Handle the context-sensitive button on a queue row."""
+
+        job = self.render_queue.get(job_id)
+
+        if job is None:
+            return
+
+        if job.status == RenderStatus.WAITING:
+            self.render_queue.move_to_next(
+                job_id
+            )
+
+            self.refresh_queue_page()
+
+            if self.current_job is None:
+                self.queue_running = True
+                self.start_next_queue_job()
+
+        elif job.status == RenderStatus.RENDERING:
+            self.cancel_render()
+
+        elif job.status == RenderStatus.COMPLETED:
+            QDesktopServices.openUrl(
+                QUrl.fromLocalFile(
+                    str(job.output_path.parent)
+                )
+            )
+
+        elif job.status in {
+            RenderStatus.FAILED,
+            RenderStatus.CANCELLED,
+        }:
+            self.retry_queue_job(job)
+
+
+    def retry_queue_job(self, job):
+        """Retry a failed or cancelled job."""
+
+        if job.output_path.exists():
+            answer = QMessageBox.question(
+                self,
+                "Remove partial output?",
+                (
+                    "A partial output file exists:\n\n"
+                    f"{job.output_path}\n\n"
+                    "Delete it and retry?"
+                ),
+                (
+                    QMessageBox.StandardButton.Yes
+                    | QMessageBox.StandardButton.No
+                ),
+                QMessageBox.StandardButton.No,
+            )
+
+            if (
+                answer
+                != QMessageBox.StandardButton.Yes
+            ):
+                return
+
+            try:
+                job.output_path.unlink()
+
+            except OSError as error:
+                self.show_error(
+                    "Could not remove the partial "
+                    f"output:\n{error}"
+                )
+                return
+
+        job.mark_waiting()
+        self.render_queue.move_to_next(
+            job.job_id
+        )
+
+        self.refresh_queue_page()
+
+        if self.current_job is None:
+            self.queue_running = True
+            self.start_next_queue_job()
