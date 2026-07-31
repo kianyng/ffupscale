@@ -48,8 +48,6 @@ Do not run the application directly from inside the ZIP or move
 - Target file size and compression
 - Video trimmer
 
-[View development progress](progress.md)
-
 ## Requirements
 
 ### Packaged application
