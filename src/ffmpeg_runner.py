@@ -2,17 +2,207 @@ from pathlib import Path
 
 from ffmpeg_manager import find_ffmpeg
 
-SUPPORTED_ENCODERS = {
-    "libx264",
-    "libx265",
-}
+# -- Shared Encoding Speeds --
 
-# Only expose presets supported by both software encoders in the UI.
-ENCODING_PRESETS = {
+ENCODING_SPEEDS = {
     "fast",
     "medium",
     "slow",
 }
+
+
+# -- Encoder Profiles --
+
+ENCODER_PROFILES = {
+    # CPU encoders
+    "libx264": {
+        "vendor": "cpu",
+        "codec": "h264",
+        "hardware": False,
+        "preset_option": "-preset",
+        "presets": {
+            "fast": "fast",
+            "medium": "medium",
+            "slow": "slow",
+        },
+    },
+    "libx265": {
+        "vendor": "cpu",
+        "codec": "h265",
+        "hardware": False,
+        "preset_option": "-preset",
+        "presets": {
+            "fast": "fast",
+            "medium": "medium",
+            "slow": "slow",
+        },
+    },
+
+    # NVIDIA NVENC
+    "h264_nvenc": {
+        "vendor": "nvidia",
+        "codec": "h264",
+        "hardware": True,
+        "preset_option": "-preset",
+        "presets": {
+            "fast": "p2",
+            "medium": "p4",
+            "slow": "p7",
+        },
+    },
+    "hevc_nvenc": {
+        "vendor": "nvidia",
+        "codec": "h265",
+        "hardware": True,
+        "preset_option": "-preset",
+        "presets": {
+            "fast": "p2",
+            "medium": "p4",
+            "slow": "p7",
+        },
+    },
+
+    # AMD AMF
+    "h264_amf": {
+        "vendor": "amd",
+        "codec": "h264",
+        "hardware": True,
+        "preset_option": "-quality",
+        "presets": {
+            "fast": "speed",
+            "medium": "balanced",
+            "slow": "quality",
+        },
+    },
+    "hevc_amf": {
+        "vendor": "amd",
+        "codec": "h265",
+        "hardware": True,
+        "preset_option": "-quality",
+        "presets": {
+            "fast": "speed",
+            "medium": "balanced",
+            "slow": "quality",
+        },
+    },
+
+    # Intel Quick Sync
+    "h264_qsv": {
+        "vendor": "intel",
+        "codec": "h264",
+        "hardware": True,
+        "preset_option": "-preset",
+        "presets": {
+            "fast": "fast",
+            "medium": "medium",
+            "slow": "slow",
+        },
+    },
+    "hevc_qsv": {
+        "vendor": "intel",
+        "codec": "h265",
+        "hardware": True,
+        "preset_option": "-preset",
+        "presets": {
+            "fast": "fast",
+            "medium": "medium",
+            "slow": "slow",
+        },
+    },
+}
+
+
+SUPPORTED_ENCODERS = set(ENCODER_PROFILES)
+
+
+# -- Encoder Arguments --
+
+def build_video_encoder_arguments(
+    encoder,
+    quality,
+    speed,
+):
+    """Build quality and speed arguments for a video encoder."""
+
+    if encoder not in ENCODER_PROFILES:
+        raise ValueError(
+            f"Unknown encoder: {encoder}"
+        )
+
+    if speed not in ENCODING_SPEEDS:
+        raise ValueError(
+            f"Unknown encoding speed: {speed}"
+        )
+
+    if (
+        isinstance(quality, bool)
+        or not isinstance(quality, int)
+    ):
+        raise ValueError(
+            "Quality must be a whole number."
+        )
+
+    if not 1 <= quality <= 51:
+        raise ValueError(
+            "Quality must be between 1 and 51."
+        )
+
+    profile = ENCODER_PROFILES[encoder]
+
+    # ffupscale presents larger values as better quality. FFmpeg's CRF,
+    # CQ and QP systems generally use smaller values for better quality.
+    ffmpeg_quality = 52 - quality
+
+    arguments = [
+        "-c:v",
+        encoder,
+        profile["preset_option"],
+        profile["presets"][speed],
+    ]
+
+    vendor = profile["vendor"]
+
+    if vendor == "cpu":
+        arguments.extend([
+            "-crf",
+            str(ffmpeg_quality),
+        ])
+
+    elif vendor == "nvidia":
+        arguments.extend([
+            "-rc",
+            "vbr",
+            "-cq",
+            str(ffmpeg_quality),
+            "-b:v",
+            "0",
+        ])
+
+    elif vendor == "amd":
+        arguments.extend([
+            "-rc",
+            "cqp",
+            "-qp_i",
+            str(ffmpeg_quality),
+            "-qp_p",
+            str(ffmpeg_quality),
+        ])
+
+    elif vendor == "intel":
+        arguments.extend([
+            "-global_quality",
+            str(ffmpeg_quality),
+        ])
+
+    else:
+        raise ValueError(
+            f"Unsupported encoder vendor: {vendor}"
+        )
+
+    return arguments
+
+
+# -- FFmpeg Command --
 
 def build_upscale_command(
     input_path,
@@ -52,29 +242,21 @@ def build_upscale_command(
             f"Unknown encoder: {encoder}"
         )
 
-    if (
-        isinstance(quality, bool)
-        or not isinstance(quality, int)
-    ):
+    if preset not in ENCODING_SPEEDS:
         raise ValueError(
-            "Quality must be a whole number."
+            f"Unknown encoding speed: {preset}"
         )
-
-    if not 1 <= quality <= 51:
-        raise ValueError(
-            "Quality must be between 1 and 51."
-        )
-
-    if preset not in ENCODING_PRESETS:
-        raise ValueError(f"Unknown encoding preset: {preset}")
 
     if fps is not None and fps <= 0:
         raise ValueError("FPS must be greater than zero.")
 
-    # The UI uses higher numbers for better quality, while FFmpeg CRF
-    # uses lower numbers for better quality.
-
-    crf = 52 - quality
+    video_encoder_arguments = (
+        build_video_encoder_arguments(
+            encoder=encoder,
+            quality=quality,
+            speed=preset,
+        )
+    )
 
     arguments = [
         # Send machine-readable progress to stdout for the Qt progress bar.
@@ -95,13 +277,8 @@ def build_upscale_command(
         # Upscaling
         "-vf",
         f"scale={width}:{height}:flags=lanczos",
-        # Video encoding
-        "-c:v",
-        encoder,
-        "-preset",
-        preset,
-        "-crf",
-        str(crf),
+        # Encoder-specific codec, quality and speed options
+        *video_encoder_arguments,
         # Broad playback compatibility
         "-pix_fmt",
         "yuv420p",
@@ -114,8 +291,11 @@ def build_upscale_command(
     ]
 
     # hvc1 improves H.265 recognition in Apple players and devices.
-    if encoder == "libx265":
-        arguments.extend(["-tag:v", "hvc1"])
+    if ENCODER_PROFILES[encoder]["codec"] == "h265":
+        arguments.extend([
+            "-tag:v",
+            "hvc1",
+        ])
 
     if fps is not None:
         arguments.extend(["-r", str(fps)])

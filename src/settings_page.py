@@ -17,8 +17,11 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QLineEdit,
     QMessageBox,
+    QCheckBox,
 )
 
+
+# -- Settings Page --
 
 class SettingsPage(QWidget):
     """Collect encoding settings and report user actions to MainWindow."""
@@ -27,13 +30,17 @@ class SettingsPage(QWidget):
     back_requested = pyqtSignal()
     render_requested = pyqtSignal(dict)
     cancel_requested = pyqtSignal()
+    queue_requested = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()
 
-        self.is_rendering = False
+        # -- Page State --
 
+        self.is_rendering = False
         self.input_path = None
+
+        # -- Page Header --
 
         title = QLabel("Upscale settings")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -44,6 +51,8 @@ class SettingsPage(QWidget):
 
         self.video_name = QLabel("No video selected")
         self.video_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # -- Resolution Settings --
 
         self.resolution_box = QComboBox()
         # Item data holds the actual dimensions used by FFmpeg.
@@ -103,6 +112,8 @@ class SettingsPage(QWidget):
 
         self.custom_resolution_label = QLabel("Custom resolution:")
 
+        # -- Frame Rate Settings --
+
         self.fps_box = QComboBox()
         # String sentinels distinguish special options from numeric frame rates.
         self.fps_box.addItem(
@@ -146,10 +157,12 @@ class SettingsPage(QWidget):
 
         self.fps_box.currentIndexChanged.connect(self.update_custom_fps_visibility)
 
+        # -- Quality Settings --
+
         self.quality_box = QComboBox()
 
-        # FFmpeg CRF quality control. Lower values preserve more quality but
-        # produce larger files.
+        # The UI presents higher values as better quality. The FFmpeg backend
+        # translates this value for the selected CPU or hardware encoder.
         self.quality_slider = QSlider(
             Qt.Orientation.Horizontal
         )
@@ -255,12 +268,35 @@ class SettingsPage(QWidget):
             quality_widget_layout
         )
 
+        # -- Encoder Settings --
+
+        # Hardware encoders are supplied after background detection finishes.
+        self.hardware_encoders = {}
+
+        self.gpu_encoding_checkbox = QCheckBox(
+            "Use GPU encoding"
+        )
+        self.gpu_encoding_checkbox.setEnabled(False)
+        self.gpu_encoding_checkbox.setToolTip(
+            "Checking for supported hardware encoders."
+        )
+
+        self.gpu_status = QLabel(
+            "Detecting GPU encoding support..."
+        )
+        self.gpu_status.setStyleSheet("""
+            color: #999999;
+            font-size: 11px;
+        """)
+
         self.encoder_box = QComboBox()
 
-        self.encoder_box.addItem(
-            "H.264 — best compatibility",
-            "libx264",
+        self.gpu_encoding_checkbox.toggled.connect(
+            self.update_encoder_options
         )
+
+        # Start with CPU encoders while detection runs.
+        self.update_encoder_options()
 
         self.encoder_box.addItem(
             "H.265 — smaller files",
@@ -285,6 +321,8 @@ class SettingsPage(QWidget):
         )
 
         self.preset_box.setCurrentIndex(1)
+
+        # -- Output Settings --
 
         # Output folder
         self.output_folder_edit = QLineEdit()
@@ -345,6 +383,8 @@ class SettingsPage(QWidget):
             self.update_output_path_preview
         )
 
+        # -- Settings Form --
+
         settings_form = QFormLayout()
         settings_form.setVerticalSpacing(20)
         settings_form.addRow(
@@ -374,6 +414,16 @@ class SettingsPage(QWidget):
         settings_form.addRow(
             "Quality:",
             self.quality_widget,
+        )
+
+        settings_form.addRow(
+            "",
+            self.gpu_encoding_checkbox,
+        )
+
+        settings_form.addRow(
+            "GPU support:",
+            self.gpu_status,
         )
 
         settings_form.addRow(
@@ -484,6 +534,8 @@ class SettingsPage(QWidget):
             False
         )
 
+        # -- Page Actions --
+
         self.back_button = QPushButton("Back")
 
         self.back_button.clicked.connect(self.back_requested.emit)
@@ -508,6 +560,22 @@ class SettingsPage(QWidget):
 
         self.render_button.clicked.connect(self.request_render)
 
+        self.queue_button = QPushButton(
+            "Add to queue"
+        )
+
+        self.queue_button.setStyleSheet("""
+            QPushButton {
+                font-size: 15px;
+                font-weight: bold;
+                padding: 8px;
+            }
+        """)
+
+        self.queue_button.clicked.connect(
+            self.request_queue
+        )
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -516,8 +584,21 @@ class SettingsPage(QWidget):
         self.progress_bar.hide()
 
         button_layout = QHBoxLayout()
-        button_layout.addWidget(self.back_button, stretch=1)
-        button_layout.addWidget(self.render_button, stretch=1)
+
+        button_layout.addWidget(
+            self.back_button,
+            stretch=1,
+        )
+
+        button_layout.addWidget(
+            self.queue_button,
+            stretch=1,
+        )
+
+        button_layout.addWidget(
+            self.render_button,
+            stretch=1,
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 20, 30, 30)
@@ -539,6 +620,8 @@ class SettingsPage(QWidget):
 
         self.update_custom_resolution_visibility()
         self.update_custom_fps_visibility()
+
+    # -- Video and Output Selection --
 
     def set_video(self, file_path):
         """Display the input and suggest an output location."""
@@ -688,6 +771,8 @@ class SettingsPage(QWidget):
 
         return output_path
 
+    # -- Setting Values and Visibility --
+
     def update_custom_resolution_visibility(self):
         """Show custom dimensions only when Custom is selected."""
 
@@ -756,6 +841,8 @@ class SettingsPage(QWidget):
             "output_path": self.get_output_path(),
         }
 
+    # -- Render Requests and Progress --
+
     def request_render(self):
         """Treat the primary button as Render or Cancel based on page state."""
 
@@ -774,21 +861,48 @@ class SettingsPage(QWidget):
                 str(error),
             )
 
+    def request_queue(self):
+        """Validate the settings and request a new queued job."""
+
+        if self.is_rendering:
+            return
+
+        try:
+            settings = self.get_settings()
+            self.queue_requested.emit(settings)
+
+        except ValueError as error:
+            QMessageBox.warning(
+                self,
+                "Invalid settings",
+                str(error),
+            )
+
     def set_rendering(self, rendering):
         """Update controls when an FFmpeg process starts or stops."""
 
         self.is_rendering = rendering
-        self.back_button.setEnabled(not rendering)
+        self.back_button.setEnabled(
+            not rendering
+        )
+        self.queue_button.setEnabled(
+            not rendering
+        )
 
         if rendering:
-            self.render_button.setText("Cancel")
+            self.render_button.setText(
+                "Cancel"
+            )
             self.render_button.setEnabled(True)
 
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat("%p%")
             self.progress_bar.show()
+
         else:
-            self.render_button.setText("Render")
+            self.render_button.setText(
+                "Render"
+            )
             self.render_button.setEnabled(True)
 
     def set_cancelling(self):
@@ -802,3 +916,137 @@ class SettingsPage(QWidget):
 
         percentage = max(0, min(100, int(percentage)))
         self.progress_bar.setValue(percentage)
+
+    # -- Hardware Encoder Options --
+
+    def set_hardware_encoders(self, encoders):
+        """Store detected hardware encoders and update the GPU controls."""
+
+        self.hardware_encoders = encoders
+
+        if not encoders:
+            self.gpu_encoding_checkbox.setChecked(
+                False
+            )
+            self.gpu_encoding_checkbox.setEnabled(
+                False
+            )
+            self.gpu_encoding_checkbox.setToolTip(
+                "No usable GPU encoder was detected."
+            )
+            self.gpu_status.setText(
+                "No supported GPU encoder detected"
+            )
+
+        else:
+            vendor_names = {
+                "nvidia": "NVIDIA",
+                "amd": "AMD",
+                "intel": "Intel",
+            }
+
+            detected_vendors = [
+                vendor_names.get(vendor, vendor.title())
+                for vendor in encoders
+            ]
+
+            vendor_text = ", ".join(detected_vendors)
+
+            self.gpu_encoding_checkbox.setEnabled(
+                True
+            )
+            self.gpu_encoding_checkbox.setToolTip(
+                f"Use the detected {vendor_text} GPU encoder."
+            )
+            self.gpu_status.setText(
+                f"{vendor_text} hardware encoding available"
+            )
+
+        self.update_encoder_options()
+
+
+    def update_encoder_options(self):
+        """Show CPU or detected hardware encoders."""
+
+        previous_encoder = (
+            self.encoder_box.currentData()
+        )
+
+        # Try to preserve whether the user selected H.264 or H.265.
+        if previous_encoder in {
+            "libx265",
+            "hevc_nvenc",
+            "hevc_amf",
+            "hevc_qsv",
+        }:
+            previous_codec = "h265"
+        else:
+            previous_codec = "h264"
+
+        self.encoder_box.blockSignals(True)
+        self.encoder_box.clear()
+
+        use_gpu = (
+            self.gpu_encoding_checkbox.isChecked()
+            and bool(self.hardware_encoders)
+        )
+
+        if use_gpu:
+            vendor_names = {
+                "nvidia": "NVIDIA NVENC",
+                "amd": "AMD AMF",
+                "intel": "Intel Quick Sync",
+            }
+
+            for vendor, codecs in (
+                self.hardware_encoders.items()
+            ):
+                vendor_label = vendor_names.get(
+                    vendor,
+                    vendor.title(),
+                )
+
+                if "h264" in codecs:
+                    self.encoder_box.addItem(
+                        f"H.264 — {vendor_label}",
+                        codecs["h264"],
+                    )
+
+                if "h265" in codecs:
+                    self.encoder_box.addItem(
+                        f"H.265 — {vendor_label}",
+                        codecs["h265"],
+                    )
+
+        else:
+            self.encoder_box.addItem(
+                "H.264 — CPU, best compatibility",
+                "libx264",
+            )
+            self.encoder_box.addItem(
+                "H.265 — CPU, smaller files",
+                "libx265",
+            )
+
+        # Restore the previously selected codec where possible.
+        for index in range(
+            self.encoder_box.count()
+        ):
+            encoder = self.encoder_box.itemData(index)
+
+            encoder_codec = (
+                "h265"
+                if encoder in {
+                    "libx265",
+                    "hevc_nvenc",
+                    "hevc_amf",
+                    "hevc_qsv",
+                }
+                else "h264"
+            )
+
+            if encoder_codec == previous_codec:
+                self.encoder_box.setCurrentIndex(index)
+                break
+
+        self.encoder_box.blockSignals(False)
