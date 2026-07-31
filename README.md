@@ -17,7 +17,7 @@ FFmpeg normally requires a command prompt, terminal, or batch file. ffupscale pr
 
 ## Download
 
-[Download ffupscale v0.1.0 Beta 3](https://github.com/kianyng/ffupscale/releases/tag/v0.1.0-beta.3)
+[Download ffupscale v0.1.0 Beta 4](https://github.com/kianyng/ffupscale/releases/tag/v0.1.0-beta.4)
 
 After downloading:
 
@@ -40,12 +40,12 @@ Do not run the application directly from inside the ZIP or move
 - Render cancellation
 - Bundled FFmpeg and FFprobe in the packaged Windows build
 - Custom output location
+- Additional hardware encoders
+- Render queue
 
 ## Planned features
 
 - Target file size and compression
-- Additional hardware encoders
-- Render queue
 - Video trimmer
 
 [View development progress](progress.md)
