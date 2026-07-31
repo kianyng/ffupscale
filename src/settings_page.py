@@ -157,9 +157,25 @@ class SettingsPage(QWidget):
 
         self.fps_box.currentIndexChanged.connect(self.update_custom_fps_visibility)
 
-        # -- Quality Settings --
+        # -- Rate Control Settings --
 
-        self.quality_box = QComboBox()
+        self.rate_control_box = QComboBox()
+
+        self.rate_control_box.addItem(
+            "Quality",
+            "quality",
+        )
+
+        self.rate_control_box.addItem(
+            "Target file size",
+            "target_size",
+        )
+
+        self.rate_control_box.currentIndexChanged.connect(
+            self.update_rate_control_visibility
+        )
+
+        # -- Quality Settings --
 
         # The UI presents higher values as better quality. The FFmpeg backend
         # translates this value for the selected CPU or hardware encoder.
@@ -266,6 +282,27 @@ class SettingsPage(QWidget):
         self.quality_widget = QWidget()
         self.quality_widget.setLayout(
             quality_widget_layout
+        )
+
+        # -- Target File Size Settings --
+
+        self.target_size_box = QDoubleSpinBox()
+        self.target_size_box.setRange(1.0, 100000.0)
+        self.target_size_box.setValue(100.0)
+        self.target_size_box.setDecimals(1)
+        self.target_size_box.setSingleStep(10.0)
+        self.target_size_box.setSuffix(" MB")
+
+        self.target_size_box.setToolTip(
+            "The finished file will be approximately this size."
+        )
+
+        self.target_size_label = QLabel(
+            "Target size:"
+        )
+
+        self.quality_label = QLabel(
+            "Quality:"
         )
 
         # -- Encoder Settings --
@@ -412,8 +449,18 @@ class SettingsPage(QWidget):
         )
 
         settings_form.addRow(
-            "Quality:",
+            "Size control:",
+            self.rate_control_box,
+        )
+
+        settings_form.addRow(
+            self.quality_label,
             self.quality_widget,
+        )
+
+        settings_form.addRow(
+            self.target_size_label,
+            self.target_size_box,
         )
 
         settings_form.addRow(
@@ -620,6 +667,7 @@ class SettingsPage(QWidget):
 
         self.update_custom_resolution_visibility()
         self.update_custom_fps_visibility()
+        self.update_rate_control_visibility()
 
     # -- Video and Output Selection --
 
@@ -773,6 +821,28 @@ class SettingsPage(QWidget):
 
     # -- Setting Values and Visibility --
 
+    def update_rate_control_visibility(self):
+        """Show controls for the selected rate-control mode."""
+
+        target_size_selected = (
+            self.rate_control_box.currentData()
+            == "target_size"
+        )
+
+        self.quality_label.setVisible(
+            not target_size_selected
+        )
+        self.quality_widget.setVisible(
+            not target_size_selected
+        )
+
+        self.target_size_label.setVisible(
+            target_size_selected
+        )
+        self.target_size_box.setVisible(
+            target_size_selected
+        )
+
     def update_custom_resolution_visibility(self):
         """Show custom dimensions only when Custom is selected."""
 
@@ -832,10 +902,28 @@ class SettingsPage(QWidget):
 
         width, height = self.get_resolution()
 
+        rate_control = (
+            self.rate_control_box.currentData()
+        )
+
+        target_size_mb = None
+
+        if rate_control == "target_size":
+            target_size_mb = (
+                self.target_size_box.value()
+            )
+
+            if target_size_mb <= 0:
+                raise ValueError(
+                    "Target file size must be greater than zero."
+                )
+
         return {
             "resolution": (width, height),
             "fps": self.get_fps(),
+            "rate_control": rate_control,
             "quality": self.quality_slider.value(),
+            "target_size_mb": target_size_mb,
             "encoder": self.encoder_box.currentData(),
             "preset": self.preset_box.currentData(),
             "output_path": self.get_output_path(),
