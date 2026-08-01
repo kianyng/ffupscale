@@ -6,9 +6,9 @@ from PyQt6.QtCore import (
     QObject,
     QProcess,
     QRectF,
+    Qt,
     QThread,
     QTimer,
-    Qt,
     QUrl,
     pyqtSignal,
     pyqtSlot,
@@ -35,19 +35,16 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ffmpeg_runner import build_upscale_command
-
-from settings_page import SettingsPage
-
 from ffmpeg_manager import (
+    detect_hardware_encoders,
     find_ffmpeg,
     find_ffprobe,
-    detect_hardware_encoders,
 )
-
+from ffmpeg_runner import build_upscale_command
 from queue_page import QueuePage
 from render_job import RenderJob, RenderStatus
 from render_queue import RenderQueue
+from settings_page import SettingsPage
 
 # Prevent FFmpeg and FFprobe from opening console windows on Windows.
 SUBPROCESS_FLAGS = getattr(
@@ -77,7 +74,7 @@ def read_video_properties(file_path):
         "-select_streams",
         "v:0",
         "-show_entries",
-        ("stream=width,height,avg_frame_rate,codec_name:" "format=duration,size"),
+        ("stream=width,height,avg_frame_rate,codec_name:format=duration,size"),
         "-of",
         "json",
         file_path,
@@ -161,15 +158,14 @@ def create_video_thumbnail(file_path):
     result = subprocess.run(
         command,
         capture_output=True,
+        check=False,
         creationflags=SUBPROCESS_FLAGS,
     )
 
     if result.returncode != 0 or not result.stdout:
         ffmpeg_error = result.stderr.decode(errors="replace")
 
-        raise ValueError(
-            f"FFmpeg could not create a video thumbnail:\n" f"{ffmpeg_error}"
-        )
+        raise ValueError(f"FFmpeg could not create a video thumbnail:\n{ffmpeg_error}")
 
     thumbnail = QPixmap()
 
@@ -183,6 +179,7 @@ def create_video_thumbnail(file_path):
 
 
 # -- Video Drop Area --
+
 
 class DropArea(QFrame):
     """Clickable drag-and-drop target that previews the selected video."""
@@ -229,9 +226,7 @@ class DropArea(QFrame):
         self.thumbnail_resize_timer = QTimer(self)
         self.thumbnail_resize_timer.setSingleShot(True)
         self.thumbnail_resize_timer.setInterval(40)
-        self.thumbnail_resize_timer.timeout.connect(
-            self.display_thumbnail
-        )
+        self.thumbnail_resize_timer.timeout.connect(self.display_thumbnail)
 
         # This means the label will not intercept mouse clicks.
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -265,7 +260,6 @@ class DropArea(QFrame):
             }
         """)
 
-
     def mousePressEvent(self, event):
         """Open the file picker when the drop area is clicked."""
 
@@ -279,7 +273,7 @@ class DropArea(QFrame):
             self,
             "Select a video",
             "",
-            ("Video files (*.mp4 *.mov *.mkv *.avi *.webm);;" "All files (*.*)"),
+            ("Video files (*.mp4 *.mov *.mkv *.avi *.webm);;All files (*.*)"),
         )
 
         if file_path:
@@ -352,9 +346,7 @@ class DropArea(QFrame):
         )
 
         content_height = round(
-            content_width
-            * self.thumbnail.height()
-            / self.thumbnail.width()
+            content_width * self.thumbnail.height() / self.thumbnail.width()
         )
 
         return content_height + (self.thumbnail_padding * 2)
@@ -365,9 +357,7 @@ class DropArea(QFrame):
         hint = super().sizeHint()
 
         if self.hasHeightForWidth():
-            hint.setHeight(
-                self.heightForWidth(max(1, self.width()))
-            )
+            hint.setHeight(self.heightForWidth(max(1, self.width())))
         else:
             hint.setHeight(self.empty_minimum_height)
 
@@ -430,6 +420,7 @@ class DropArea(QFrame):
 
 # -- Hardware Detection Worker --
 
+
 class EncoderDetectionWorker(QObject):
     """Detect hardware encoders without blocking the interface."""
 
@@ -451,6 +442,7 @@ class EncoderDetectionWorker(QObject):
 
 
 # -- Main Window --
+
 
 class MainWindow(QMainWindow):
     """Coordinate video selection, navigation, and FFmpeg rendering."""
@@ -530,9 +522,7 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        self.queue_view_button = QPushButton(
-            "Queue (0)"
-        )
+        self.queue_view_button = QPushButton("Queue (0)")
 
         self.queue_view_button.setStyleSheet("""
             QPushButton {
@@ -552,23 +542,15 @@ class MainWindow(QMainWindow):
         )
         button_layout.setSpacing(10)
 
-        button_layout.addWidget(
-            self.continue_button
-        )
+        button_layout.addWidget(self.continue_button)
 
-        button_layout.addWidget(
-            self.queue_view_button
-        )
+        button_layout.addWidget(self.queue_view_button)
 
         # Right side: properties followed by navigation buttons.
         right_layout = QVBoxLayout()
         right_layout.addStretch()
-        right_layout.addLayout(
-            properties_layout
-        )
-        right_layout.addLayout(
-            button_layout
-        )
+        right_layout.addLayout(properties_layout)
+        right_layout.addLayout(button_layout)
         right_layout.addStretch()
 
         # Drop area on the left, information on the right
@@ -641,41 +623,23 @@ class MainWindow(QMainWindow):
 
         self.settings_page.cancel_requested.connect(self.cancel_render)
 
-        self.settings_page.queue_requested.connect(
-            self.add_to_queue
-        )
+        self.settings_page.queue_requested.connect(self.add_to_queue)
 
-        self.settings_page.view_queue_requested.connect(
-            self.open_queue_page
-        )
+        self.settings_page.view_queue_requested.connect(self.open_queue_page)
 
-        self.queue_view_button.clicked.connect(
-            self.open_queue_page
-        )
+        self.queue_view_button.clicked.connect(self.open_queue_page)
 
-        self.queue_page.back_requested.connect(
-            self.close_queue_page
-        )
+        self.queue_page.back_requested.connect(self.close_queue_page)
 
-        self.queue_page.remove_job_requested.connect(
-            self.remove_queue_job
-        )
+        self.queue_page.remove_job_requested.connect(self.remove_queue_job)
 
-        self.queue_page.clear_completed_requested.connect(
-            self.clear_completed_jobs
-        )
+        self.queue_page.clear_completed_requested.connect(self.clear_completed_jobs)
 
-        self.queue_page.start_queue_requested.connect(
-            self.start_queue
-        )
+        self.queue_page.start_queue_requested.connect(self.start_queue)
 
-        self.queue_page.stop_queue_requested.connect(
-            self.stop_queue
-        )
+        self.queue_page.stop_queue_requested.connect(self.stop_queue)
 
-        self.queue_page.job_action_requested.connect(
-            self.handle_queue_job_action
-        )
+        self.queue_page.job_action_requested.connect(self.handle_queue_job_action)
 
     # -- Video Selection and Navigation --
 
@@ -769,24 +733,15 @@ class MainWindow(QMainWindow):
     def start_render(self, settings):
         """Create and immediately start a single render job."""
 
-        if (
-            self.ffmpeg_process.state()
-            != QProcess.ProcessState.NotRunning
-        ):
-            self.show_error(
-                "A video is already being rendered."
-            )
+        if self.ffmpeg_process.state() != QProcess.ProcessState.NotRunning:
+            self.show_error("A video is already being rendered.")
             return
 
         try:
-            job = self.create_render_job(
-                settings
-            )
+            job = self.create_render_job(settings)
 
             self.render_queue.add(job)
-            self.render_queue.move_to_next(
-                job.job_id
-            )
+            self.render_queue.move_to_next(job.job_id)
 
             # Render only this job. Waiting queue jobs will not
             # automatically continue unless Start queue is pressed.
@@ -843,23 +798,12 @@ class MainWindow(QMainWindow):
                 try:
                     processed_seconds = int(value) / 1_000_000
 
-                    if (
-                        self.current_job is not None
-                        and self.current_job.duration > 0
-                    ):
-                        percentage = (
-                            processed_seconds
-                            / self.current_job.duration
-                            * 100
-                        )
+                    if self.current_job is not None and self.current_job.duration > 0:
+                        percentage = processed_seconds / self.current_job.duration * 100
 
-                        self.current_job.set_progress(
-                            percentage
-                        )
+                        self.current_job.set_progress(percentage)
 
-                        self.settings_page.set_progress(
-                            percentage
-                        )
+                        self.settings_page.set_progress(percentage)
 
                         self.queue_page.update_job(
                             self.current_job,
@@ -869,21 +813,15 @@ class MainWindow(QMainWindow):
                 except ValueError:
                     pass
 
-            elif (
-                key == "progress"
-                and value == "end"
-            ):
-                if self.current_job is not None:
-                    self.current_job.set_progress(100)
+            elif key == "progress" and value == "end" and self.current_job is not None:
+                self.current_job.set_progress(100)
 
-                    self.settings_page.set_progress(
-                        100
-                    )
+                self.settings_page.set_progress(100)
 
-                    self.queue_page.update_job(
-                        self.current_job,
-                        has_active_job=True,
-                    )
+                self.queue_page.update_job(
+                    self.current_job,
+                    has_active_job=True,
+                )
 
     # -- Render Completion and Cancellation --
 
@@ -895,9 +833,7 @@ class MainWindow(QMainWindow):
         """Finish the current job and optionally continue the queue."""
 
         job = self.current_job
-        was_cancelled = (
-            self.render_was_cancelled
-        )
+        was_cancelled = self.render_was_cancelled
 
         self.current_job = None
         self.settings_page.set_rendering(False)
@@ -908,38 +844,23 @@ class MainWindow(QMainWindow):
         if was_cancelled:
             job.mark_cancelled()
 
-        elif (
-            exit_code == 0
-            and job.output_path.is_file()
-        ):
+        elif exit_code == 0 and job.output_path.is_file():
             job.mark_completed()
 
         else:
-            error_lines = (
-                self.ffmpeg_log
-                .strip()
-                .splitlines()
-            )
+            error_lines = self.ffmpeg_log.strip().splitlines()
 
             final_lines = error_lines[-10:]
 
-            error_message = (
-                f"FFmpeg exited with code "
-                f"{exit_code}."
-            )
+            error_message = f"FFmpeg exited with code {exit_code}."
 
             if final_lines:
-                error_message += (
-                    "\n\n"
-                    + "\n".join(final_lines)
-                )
+                error_message += "\n\n" + "\n".join(final_lines)
 
             job.mark_failed(error_message)
 
             if not self.queue_running:
-                self.show_error(
-                    error_message
-                )
+                self.show_error(error_message)
 
         self.refresh_queue_page()
 
@@ -977,37 +898,25 @@ class MainWindow(QMainWindow):
     def start_encoder_detection(self):
         """Run hardware encoder detection in a worker thread."""
 
-        self.encoder_detection_thread = QThread(
-            self
-        )
+        self.encoder_detection_thread = QThread(self)
 
-        self.encoder_detection_worker = (
-            EncoderDetectionWorker()
-        )
+        self.encoder_detection_worker = EncoderDetectionWorker()
 
-        self.encoder_detection_worker.moveToThread(
-            self.encoder_detection_thread
-        )
+        self.encoder_detection_worker.moveToThread(self.encoder_detection_thread)
 
-        self.encoder_detection_thread.started.connect(
-            self.encoder_detection_worker.run
-        )
+        self.encoder_detection_thread.started.connect(self.encoder_detection_worker.run)
 
         self.encoder_detection_worker.detected.connect(
             self.settings_page.set_hardware_encoders
         )
 
-        self.encoder_detection_worker.failed.connect(
-            self.encoder_detection_failed
-        )
+        self.encoder_detection_worker.failed.connect(self.encoder_detection_failed)
 
         self.encoder_detection_worker.detected.connect(
             self.encoder_detection_thread.quit
         )
 
-        self.encoder_detection_worker.failed.connect(
-            self.encoder_detection_thread.quit
-        )
+        self.encoder_detection_worker.failed.connect(self.encoder_detection_thread.quit)
 
         self.encoder_detection_worker.detected.connect(
             self.encoder_detection_worker.deleteLater
@@ -1023,13 +932,10 @@ class MainWindow(QMainWindow):
 
         self.encoder_detection_thread.start()
 
-
     def encoder_detection_failed(self, message):
         """Fall back to CPU encoding if detection fails."""
 
-        print(
-            f"Hardware encoder detection failed: {message}"
-        )
+        print(f"Hardware encoder detection failed: {message}")
 
         self.settings_page.set_hardware_encoders({})
 
@@ -1039,9 +945,7 @@ class MainWindow(QMainWindow):
         """Add the selected video without starting it."""
 
         try:
-            job = self.create_render_job(
-                settings
-            )
+            job = self.create_render_job(settings)
 
             self.render_queue.add(job)
 
@@ -1054,7 +958,6 @@ class MainWindow(QMainWindow):
         ) as error:
             self.show_error(str(error))
 
-
     def open_queue_page(self):
         """Open the queue and remember which page requested it."""
 
@@ -1065,10 +968,7 @@ class MainWindow(QMainWindow):
 
         self.refresh_queue_page()
 
-        self.pages.setCurrentWidget(
-            self.queue_page
-        )
-
+        self.pages.setCurrentWidget(self.queue_page)
 
     def close_queue_page(self):
         """Return to the page that opened the queue."""
@@ -1078,16 +978,10 @@ class MainWindow(QMainWindow):
             self.settings_page,
         }
 
-        if (
-            self.queue_return_page
-            not in valid_return_pages
-        ):
+        if self.queue_return_page not in valid_return_pages:
             self.queue_return_page = self.file_page
 
-        self.pages.setCurrentWidget(
-            self.queue_return_page
-        )
-
+        self.pages.setCurrentWidget(self.queue_return_page)
 
     def refresh_queue_page(self):
         """Refresh queue rows and the queue count button."""
@@ -1097,10 +991,7 @@ class MainWindow(QMainWindow):
             queue_running=self.queue_running,
         )
 
-        self.queue_view_button.setText(
-            f"Queue ({len(self.render_queue.jobs)})"
-        )
-
+        self.queue_view_button.setText(f"Queue ({len(self.render_queue.jobs)})")
 
     def remove_queue_job(self, job_id):
         """Remove a non-rendering job."""
@@ -1112,21 +1003,17 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             self.show_error(str(error))
 
-
     def clear_completed_jobs(self):
         """Remove completed jobs from queue history."""
 
         self.render_queue.clear_completed()
         self.refresh_queue_page()
 
-
     def create_render_job(self, settings):
         """Create and validate a job from the current selection."""
 
         if self.selected_video is None:
-            raise ValueError(
-                "Select a video first."
-            )
+            raise ValueError("Select a video first.")
 
         job = RenderJob.from_settings(
             input_path=self.selected_video,
@@ -1138,70 +1025,48 @@ class MainWindow(QMainWindow):
         new_output = job.output_path.resolve()
 
         for existing_job in self.render_queue.jobs:
-            if (
-                existing_job.output_path.resolve()
-                == new_output
-            ):
-                raise ValueError(
-                    "Another queued video already "
-                    "uses this output path."
-                )
+            if existing_job.output_path.resolve() == new_output:
+                raise ValueError("Another queued video already uses this output path.")
 
         return job
-
 
     def start_job(self, job):
         """Start one RenderJob using the shared FFmpeg process."""
 
-        if (
-            self.ffmpeg_process.state()
-            != QProcess.ProcessState.NotRunning
-        ):
-            raise RuntimeError(
-                "Another video is already rendering."
-            )
+        if self.ffmpeg_process.state() != QProcess.ProcessState.NotRunning:
+            raise RuntimeError("Another video is already rendering.")
 
         try:
             self.render_queue.start_job(job)
 
-            ffmpeg_path, arguments = (
-                build_upscale_command(
-                    input_path=job.input_path,
-                    output_path=job.output_path,
-                    width=job.width,
-                    height=job.height,
-                    quality=job.quality,
-                    fps=job.fps,
-                    encoder=job.encoder,
-                    preset=job.preset,
-                    rate_control=job.rate_control,
-                    target_size_mb=job.target_size_mb,
-                    duration=job.duration,
-                    source_fps=job.source_fps,
-                )
+            ffmpeg_path, arguments = build_upscale_command(
+                input_path=job.input_path,
+                output_path=job.output_path,
+                width=job.width,
+                height=job.height,
+                quality=job.quality,
+                fps=job.fps,
+                encoder=job.encoder,
+                preset=job.preset,
+                rate_control=job.rate_control,
+                target_size_mb=job.target_size_mb,
+                duration=job.duration,
+                source_fps=job.source_fps,
             )
 
             self.current_job = job
-            self.current_output_path = (
-                job.output_path
-            )
+            self.current_output_path = job.output_path
 
             self.ffmpeg_log = ""
             self.progress_buffer = ""
             self.render_was_cancelled = False
 
-            self.settings_page.set_rendering(
-                True
-            )
+            self.settings_page.set_rendering(True)
 
             self.refresh_queue_page()
 
             print("Starting FFmpeg:")
-            print(
-                subprocess.list2cmdline(
-                    [ffmpeg_path, *arguments]
-                )
-            )
+            print(subprocess.list2cmdline([ffmpeg_path, *arguments]))
 
             self.ffmpeg_process.start(
                 ffmpeg_path,
@@ -1217,13 +1082,10 @@ class MainWindow(QMainWindow):
             job.mark_failed(str(error))
             self.current_job = None
 
-            self.settings_page.set_rendering(
-                False
-            )
+            self.settings_page.set_rendering(False)
             self.refresh_queue_page()
 
             self.show_error(str(error))
-
 
     def start_queue(self):
         """Start or resume sequential queue processing."""
@@ -1231,12 +1093,8 @@ class MainWindow(QMainWindow):
         self.queue_running = True
         self.refresh_queue_page()
 
-        if (
-            self.ffmpeg_process.state()
-            == QProcess.ProcessState.NotRunning
-        ):
+        if self.ffmpeg_process.state() == QProcess.ProcessState.NotRunning:
             self.start_next_queue_job()
-
 
     def stop_queue(self):
         """
@@ -1248,22 +1106,16 @@ class MainWindow(QMainWindow):
         self.queue_running = False
         self.refresh_queue_page()
 
-
     def start_next_queue_job(self):
         """Start the first waiting job."""
 
         if not self.queue_running:
             return
 
-        if (
-            self.ffmpeg_process.state()
-            != QProcess.ProcessState.NotRunning
-        ):
+        if self.ffmpeg_process.state() != QProcess.ProcessState.NotRunning:
             return
 
-        next_job = (
-            self.render_queue.next_waiting_job()
-        )
+        next_job = self.render_queue.next_waiting_job()
 
         if next_job is None:
             self.queue_running = False
@@ -1278,7 +1130,6 @@ class MainWindow(QMainWindow):
 
         self.start_job(next_job)
 
-
     def handle_queue_job_action(
         self,
         job_id,
@@ -1291,9 +1142,7 @@ class MainWindow(QMainWindow):
             return
 
         if job.status == RenderStatus.WAITING:
-            self.render_queue.move_to_next(
-                job_id
-            )
+            self.render_queue.move_to_next(job_id)
 
             self.refresh_queue_page()
 
@@ -1305,18 +1154,13 @@ class MainWindow(QMainWindow):
             self.cancel_render()
 
         elif job.status == RenderStatus.COMPLETED:
-            QDesktopServices.openUrl(
-                QUrl.fromLocalFile(
-                    str(job.output_path.parent)
-                )
-            )
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(job.output_path.parent)))
 
         elif job.status in {
             RenderStatus.FAILED,
             RenderStatus.CANCELLED,
         }:
             self.retry_queue_job(job)
-
 
     def retry_queue_job(self, job):
         """Retry a failed or cancelled job."""
@@ -1330,33 +1174,22 @@ class MainWindow(QMainWindow):
                     f"{job.output_path}\n\n"
                     "Delete it and retry?"
                 ),
-                (
-                    QMessageBox.StandardButton.Yes
-                    | QMessageBox.StandardButton.No
-                ),
+                (QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No),
                 QMessageBox.StandardButton.No,
             )
 
-            if (
-                answer
-                != QMessageBox.StandardButton.Yes
-            ):
+            if answer != QMessageBox.StandardButton.Yes:
                 return
 
             try:
                 job.output_path.unlink()
 
             except OSError as error:
-                self.show_error(
-                    "Could not remove the partial "
-                    f"output:\n{error}"
-                )
+                self.show_error(f"Could not remove the partial output:\n{error}")
                 return
 
         job.mark_waiting()
-        self.render_queue.move_to_next(
-            job.job_id
-        )
+        self.render_queue.move_to_next(job.job_id)
 
         self.refresh_queue_page()
 

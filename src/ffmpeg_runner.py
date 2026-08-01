@@ -37,7 +37,6 @@ ENCODER_PROFILES = {
             "slow": "slow",
         },
     },
-
     # NVIDIA NVENC
     "h264_nvenc": {
         "vendor": "nvidia",
@@ -61,7 +60,6 @@ ENCODER_PROFILES = {
             "slow": "p7",
         },
     },
-
     # AMD AMF
     "h264_amf": {
         "vendor": "amd",
@@ -85,7 +83,6 @@ ENCODER_PROFILES = {
             "slow": "quality",
         },
     },
-
     # Intel Quick Sync
     "h264_qsv": {
         "vendor": "intel",
@@ -127,15 +124,12 @@ MINIMUM_BITS_PER_PIXEL = {
     # CPU
     "libx264": 0.007,
     "libx265": 0.004,
-
     # NVIDIA NVENC
     "h264_nvenc": 0.011,
     "hevc_nvenc": 0.006,
-
     # AMD AMF — provisional until tested on AMD hardware
     "h264_amf": 0.011,
     "hevc_amf": 0.006,
-
     # Intel Quick Sync — provisional until tested on Intel hardware
     "h264_qsv": 0.011,
     "hevc_qsv": 0.006,
@@ -173,34 +167,19 @@ def calculate_minimum_target_size_mb(
     ):
         return None
 
-    bits_per_pixel = (
-        MINIMUM_BITS_PER_PIXEL.get(
-            encoder
-        )
-    )
+    bits_per_pixel = MINIMUM_BITS_PER_PIXEL.get(encoder)
 
     if bits_per_pixel is None:
         return None
 
-    minimum_video_bitrate = int(
-        width
-        * height
-        * fps
-        * bits_per_pixel
-    )
+    minimum_video_bitrate = int(width * height * fps * bits_per_pixel)
 
     minimum_size_mb = (
-        (
-            minimum_video_bitrate
-            + TARGET_AUDIO_BITRATE
-        )
+        (minimum_video_bitrate + TARGET_AUDIO_BITRATE)
         * duration
         / 8
         / 1_000_000
-        / (
-            1
-            - CONTAINER_OVERHEAD_RATIO
-        )
+        / (1 - CONTAINER_OVERHEAD_RATIO)
     )
 
     return minimum_size_mb
@@ -221,57 +200,33 @@ def calculate_target_video_bitrate(
     A small allowance is reserved for the MP4 container and 128 kbps audio.
     """
 
-    if (
-        isinstance(target_size_mb, bool)
-        or not isinstance(
-            target_size_mb,
-            (int, float),
-        )
+    if isinstance(target_size_mb, bool) or not isinstance(
+        target_size_mb,
+        (int, float),
     ):
-        raise ValueError(
-            "Target file size must be a number."
-        )
+        raise TypeError("Target file size must be a number.")
 
     if target_size_mb <= 0:
-        raise ValueError(
-            "Target file size must be greater than zero."
-        )
+        raise ValueError("Target file size must be greater than zero.")
 
     if duration <= 0:
-        raise ValueError(
-            "The video duration must be greater than zero."
-        )
+        raise ValueError("The video duration must be greater than zero.")
 
-    target_bits = (
-        target_size_mb
-        * 1_000_000
-        * 8
-    )
+    target_bits = target_size_mb * 1_000_000 * 8
 
-    usable_bits = target_bits * (
-        1 - CONTAINER_OVERHEAD_RATIO
-    )
+    usable_bits = target_bits * (1 - CONTAINER_OVERHEAD_RATIO)
 
     total_bitrate = usable_bits / duration
 
-    video_bitrate = int(
-        total_bitrate
-        - TARGET_AUDIO_BITRATE
-    )
+    video_bitrate = int(total_bitrate - TARGET_AUDIO_BITRATE)
 
     if video_bitrate < MINIMUM_VIDEO_BITRATE:
         minimum_size_mb = (
-            (
-                MINIMUM_VIDEO_BITRATE
-                + TARGET_AUDIO_BITRATE
-            )
+            (MINIMUM_VIDEO_BITRATE + TARGET_AUDIO_BITRATE)
             * duration
             / 8
             / 1_000_000
-            / (
-                1
-                - CONTAINER_OVERHEAD_RATIO
-            )
+            / (1 - CONTAINER_OVERHEAD_RATIO)
         )
 
         raise ValueError(
@@ -280,14 +235,12 @@ def calculate_target_video_bitrate(
             f"Try at least {minimum_size_mb:.1f} MB."
         )
 
-    minimum_target_size_mb = (
-        calculate_minimum_target_size_mb(
-            duration=duration,
-            width=width,
-            height=height,
-            fps=fps,
-            encoder=encoder,
-        )
+    minimum_target_size_mb = calculate_minimum_target_size_mb(
+        duration=duration,
+        width=width,
+        height=height,
+        fps=fps,
+        encoder=encoder,
     )
 
     if (
@@ -304,11 +257,12 @@ def calculate_target_video_bitrate(
             "selecting H.265, increasing the target size, "
             "or using CPU encoding."
         )
-    
+
     return video_bitrate
 
 
 # -- Encoder Arguments --
+
 
 def build_video_encoder_arguments(
     encoder,
@@ -319,27 +273,16 @@ def build_video_encoder_arguments(
     """Build quality and speed arguments for a video encoder."""
 
     if encoder not in ENCODER_PROFILES:
-        raise ValueError(
-            f"Unknown encoder: {encoder}"
-        )
+        raise ValueError(f"Unknown encoder: {encoder}")
 
     if speed not in ENCODING_SPEEDS:
-        raise ValueError(
-            f"Unknown encoding speed: {speed}"
-        )
+        raise ValueError(f"Unknown encoding speed: {speed}")
 
-    if (
-        isinstance(quality, bool)
-        or not isinstance(quality, int)
-    ):
-        raise ValueError(
-            "Quality must be a whole number."
-        )
+    if isinstance(quality, bool) or not isinstance(quality, int):
+        raise TypeError("Quality must be a whole number.")
 
     if not 1 <= quality <= 51:
-        raise ValueError(
-            "Quality must be between 1 and 51."
-        )
+        raise ValueError("Quality must be between 1 and 51.")
 
     profile = ENCODER_PROFILES[encoder]
 
@@ -357,45 +300,35 @@ def build_video_encoder_arguments(
         bitrate = str(video_bitrate)
         buffer_size = str(video_bitrate * 2)
 
-        if vendor == "nvidia":
-            arguments.extend([
-                "-rc",
-                "cbr",
-                "-b:v",
-                bitrate,
-                "-minrate",
-                bitrate,
-                "-maxrate",
-                bitrate,
-                "-bufsize",
-                buffer_size,
-            ])
-
-        elif vendor == "amd":
-            arguments.extend([
-                "-rc",
-                "cbr",
-                "-b:v",
-                bitrate,
-                "-minrate",
-                bitrate,
-                "-maxrate",
-                bitrate,
-                "-bufsize",
-                buffer_size,
-            ])
+        if vendor == "nvidia" or vendor == "amd":
+            arguments.extend(
+                [
+                    "-rc",
+                    "cbr",
+                    "-b:v",
+                    bitrate,
+                    "-minrate",
+                    bitrate,
+                    "-maxrate",
+                    bitrate,
+                    "-bufsize",
+                    buffer_size,
+                ]
+            )
 
         else:
             # CPU and Intel encoders accept FFmpeg's generic
             # bitrate constraint options.
-            arguments.extend([
-                "-b:v",
-                bitrate,
-                "-maxrate",
-                bitrate,
-                "-bufsize",
-                buffer_size,
-            ])
+            arguments.extend(
+                [
+                    "-b:v",
+                    bitrate,
+                    "-maxrate",
+                    bitrate,
+                    "-bufsize",
+                    buffer_size,
+                ]
+            )
 
         return arguments
 
@@ -404,46 +337,53 @@ def build_video_encoder_arguments(
     ffmpeg_quality = 52 - quality
 
     if vendor == "cpu":
-        arguments.extend([
-            "-crf",
-            str(ffmpeg_quality),
-        ])
+        arguments.extend(
+            [
+                "-crf",
+                str(ffmpeg_quality),
+            ]
+        )
 
     elif vendor == "nvidia":
-        arguments.extend([
-            "-rc",
-            "vbr",
-            "-cq",
-            str(ffmpeg_quality),
-            "-b:v",
-            "0",
-        ])
+        arguments.extend(
+            [
+                "-rc",
+                "vbr",
+                "-cq",
+                str(ffmpeg_quality),
+                "-b:v",
+                "0",
+            ]
+        )
 
     elif vendor == "amd":
-        arguments.extend([
-            "-rc",
-            "cqp",
-            "-qp_i",
-            str(ffmpeg_quality),
-            "-qp_p",
-            str(ffmpeg_quality),
-        ])
+        arguments.extend(
+            [
+                "-rc",
+                "cqp",
+                "-qp_i",
+                str(ffmpeg_quality),
+                "-qp_p",
+                str(ffmpeg_quality),
+            ]
+        )
 
     elif vendor == "intel":
-        arguments.extend([
-            "-global_quality",
-            str(ffmpeg_quality),
-        ])
+        arguments.extend(
+            [
+                "-global_quality",
+                str(ffmpeg_quality),
+            ]
+        )
 
     else:
-        raise ValueError(
-            f"Unsupported encoder vendor: {vendor}"
-        )
+        raise ValueError(f"Unsupported encoder vendor: {vendor}")
 
     return arguments
 
 
 # -- FFmpeg Command --
+
 
 def build_upscale_command(
     input_path,
@@ -466,7 +406,6 @@ def build_upscale_command(
 
     ffmpeg_path = find_ffmpeg()
 
-
     input_path = Path(input_path)
     output_path = Path(output_path)
 
@@ -483,14 +422,10 @@ def build_upscale_command(
         raise ValueError("Width and height must both be even numbers.")
 
     if encoder not in SUPPORTED_ENCODERS:
-        raise ValueError(
-            f"Unknown encoder: {encoder}"
-        )
+        raise ValueError(f"Unknown encoder: {encoder}")
 
     if preset not in ENCODING_SPEEDS:
-        raise ValueError(
-            f"Unknown encoding speed: {preset}"
-        )
+        raise ValueError(f"Unknown encoding speed: {preset}")
 
     if fps is not None and fps <= 0:
         raise ValueError("FPS must be greater than zero.")
@@ -499,56 +434,38 @@ def build_upscale_command(
         "quality",
         "target_size",
     }:
-        raise ValueError(
-            f"Unknown rate-control mode: {rate_control}"
-        )
+        raise ValueError(f"Unknown rate-control mode: {rate_control}")
 
     video_bitrate = None
 
     if rate_control == "target_size":
         if target_size_mb is None:
-            raise ValueError(
-                "Enter a target file size."
-            )
+            raise ValueError("Enter a target file size.")
 
         if duration is None:
+            raise ValueError("Video duration is required for target-size mode.")
+
+        effective_fps = fps if fps is not None else source_fps
+
+        if effective_fps is None or effective_fps <= 0:
             raise ValueError(
-                "Video duration is required for target-size mode."
+                "The source frame rate is required for target-size validation."
             )
 
-        effective_fps = (
-            fps
-            if fps is not None
-            else source_fps
-        )
-
-        if (
-            effective_fps is None
-            or effective_fps <= 0
-        ):
-            raise ValueError(
-                "The source frame rate is required "
-                "for target-size validation."
-            )
-
-        video_bitrate = (
-            calculate_target_video_bitrate(
-                target_size_mb=target_size_mb,
-                duration=duration,
-                width=width,
-                height=height,
-                fps=effective_fps,
-                encoder=encoder,
-            )
-        )
-
-    video_encoder_arguments = (
-        build_video_encoder_arguments(
+        video_bitrate = calculate_target_video_bitrate(
+            target_size_mb=target_size_mb,
+            duration=duration,
+            width=width,
+            height=height,
+            fps=effective_fps,
             encoder=encoder,
-            quality=quality,
-            speed=preset,
-            video_bitrate=video_bitrate,
         )
+
+    video_encoder_arguments = build_video_encoder_arguments(
+        encoder=encoder,
+        quality=quality,
+        speed=preset,
+        video_bitrate=video_bitrate,
     )
 
     if rate_control == "target_size":
@@ -601,10 +518,12 @@ def build_upscale_command(
 
     # hvc1 improves H.265 recognition in Apple players and devices.
     if ENCODER_PROFILES[encoder]["codec"] == "h265":
-        arguments.extend([
-            "-tag:v",
-            "hvc1",
-        ])
+        arguments.extend(
+            [
+                "-tag:v",
+                "hvc1",
+            ]
+        )
 
     if fps is not None:
         arguments.extend(["-r", str(fps)])

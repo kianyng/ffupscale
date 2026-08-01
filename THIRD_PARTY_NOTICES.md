@@ -11,20 +11,20 @@ programs:
 - `ffmpeg.exe`
 - `ffprobe.exe`
 
-The bundled version is **FFmpeg 7.1.1**, using the
-`ffmpeg-7.1.1-full_build-www.gyan.dev` 64-bit static Windows build provided by
+The bundled version is **FFmpeg 8.1.2**, using the
+`ffmpeg-8.1.2-full_build-www.gyan.dev` 64-bit static Windows build provided by
 [Gyan Doshi](https://www.gyan.dev/ffmpeg/builds/).
 
-FFmpeg is Copyright © 2000–2025 the FFmpeg developers. The bundled full build is
+FFmpeg is Copyright © 2000–2026 the FFmpeg developers. The bundled full build is
 licensed under the **GNU General Public License, version 3 (GPLv3)**.
 Its reported configuration includes `--enable-gpl`, `--enable-version3`,
 `--enable-static`, `--enable-libx264`, and `--enable-libx265`.
 
 - License text: [licenses/GPL-3.0.txt](licenses/GPL-3.0.txt)
 - Bundled-build record: [licenses/FFmpeg-BUILD-INFO.txt](licenses/FFmpeg-BUILD-INFO.txt)
-- Corresponding FFmpeg 7.1.1 source archive:
-  [ffmpeg-7.1.1.tar.xz](https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz)
-- FFmpeg source repository: [FFmpeg/FFmpeg](https://github.com/FFmpeg/FFmpeg/tree/n7.1.1)
+- Corresponding FFmpeg 8.1.2 source archive:
+  [ffmpeg-8.1.2.tar.xz](https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz)
+- FFmpeg source repository: [FFmpeg/FFmpeg](https://github.com/FFmpeg/FFmpeg/tree/n8.1.2)
 - Build provider and documentation:
   [gyan.dev FFmpeg builds](https://www.gyan.dev/ffmpeg/builds/)
 - FFmpeg licensing information: [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html)

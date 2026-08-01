@@ -3,11 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 from uuid import uuid4
 
-
 # -- Render Status --
+
 
 class RenderStatus(str, Enum):
     """Possible states for a queued render."""
@@ -21,6 +20,7 @@ class RenderStatus(str, Enum):
 
 # -- Render Job --
 
+
 @dataclass
 class RenderJob:
     """Store everything required to render one video."""
@@ -31,19 +31,17 @@ class RenderJob:
     height: int
     quality: int
     rate_control: str
-    target_size_mb: Optional[float]
-    fps: Optional[float]
+    target_size_mb: float | None
+    fps: float | None
     encoder: str
     preset: str
     duration: float
     source_fps: float
 
-    job_id: str = field(
-        default_factory=lambda: uuid4().hex
-    )
+    job_id: str = field(default_factory=lambda: uuid4().hex)
     status: RenderStatus = RenderStatus.WAITING
     progress: int = 0
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
     def __post_init__(self):
         self.input_path = Path(self.input_path)
@@ -63,9 +61,7 @@ class RenderJob:
 
         return cls(
             input_path=Path(input_path),
-            output_path=Path(
-                settings["output_path"]
-            ),
+            output_path=Path(settings["output_path"]),
             width=width,
             height=height,
             quality=settings["quality"],
