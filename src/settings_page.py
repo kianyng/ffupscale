@@ -20,6 +20,10 @@ from PyQt6.QtWidgets import (
     QCheckBox,
 )
 
+from ffmpeg_runner import (
+    calculate_minimum_target_size_mb,
+)
+
 
 # -- Settings Page --
 
@@ -39,6 +43,8 @@ class SettingsPage(QWidget):
 
         self.is_rendering = False
         self.input_path = None
+        self.video_duration = None
+        self.source_fps = None
 
         # -- Page Header --
 
@@ -92,6 +98,14 @@ class SettingsPage(QWidget):
         self.custom_height.setValue(1080)
         self.custom_height.setSuffix(" px")
         self.custom_height.setSingleStep(2)
+
+        self.custom_width.valueChanged.connect(
+            self.update_minimum_target_size
+        )
+
+        self.custom_height.valueChanged.connect(
+            self.update_minimum_target_size
+        )
 
         custom_resolution_layout = QHBoxLayout()
         custom_resolution_layout.setContentsMargins(0, 0, 0, 0)
@@ -155,11 +169,37 @@ class SettingsPage(QWidget):
 
         self.custom_fps_label = QLabel("Custom frame rate:")
 
-        self.fps_box.currentIndexChanged.connect(self.update_custom_fps_visibility)
+        self.fps_box.currentIndexChanged.connect(
+            self.update_custom_fps_visibility
+        )
+
+        self.fps_box.currentIndexChanged.connect(
+            self.update_minimum_target_size
+        )
+
+        self.custom_fps.valueChanged.connect(
+            self.update_minimum_target_size
+        )
+
+        # -- Rate Control Settings --
+
+        self.rate_control_box = QComboBox()
+
+        self.rate_control_box.addItem(
+            "Quality",
+            "quality",
+        )
+
+        self.rate_control_box.addItem(
+            "Target file size",
+            "target_size",
+        )
+
+        self.rate_control_box.currentIndexChanged.connect(
+            self.update_rate_control_visibility
+        )
 
         # -- Quality Settings --
-
-        self.quality_box = QComboBox()
 
         # The UI presents higher values as better quality. The FFmpeg backend
         # translates this value for the selected CPU or hardware encoder.
@@ -268,6 +308,60 @@ class SettingsPage(QWidget):
             quality_widget_layout
         )
 
+        # -- Target File Size Settings --
+
+        self.target_size_box = QDoubleSpinBox()
+        self.target_size_box.setRange(1.0, 100000.0)
+        self.target_size_box.setValue(100.0)
+        self.target_size_box.setDecimals(1)
+        self.target_size_box.setSingleStep(10.0)
+        self.target_size_box.setSuffix(" MB")
+
+        self.minimum_size_label = QLabel(
+            "Estimated minimum: —"
+        )
+
+        self.minimum_size_label.setStyleSheet("""
+            color: #999999;
+            font-size: 11px;
+        """)
+
+        target_size_layout = QHBoxLayout()
+        target_size_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+        target_size_layout.setSpacing(10)
+
+        target_size_layout.addWidget(
+            self.target_size_box
+        )
+
+        target_size_layout.addWidget(
+            self.minimum_size_label
+        )
+
+        target_size_layout.addStretch()
+
+        self.target_size_widget = QWidget()
+        self.target_size_widget.setLayout(
+            target_size_layout
+        )
+
+        self.target_size_box.setToolTip(
+            "The finished file will be approximately this size."
+        )
+
+        self.target_size_label = QLabel(
+            "Target size:"
+        )
+
+        self.quality_label = QLabel(
+            "Quality:"
+        )
+
         # -- Encoder Settings --
 
         # Hardware encoders are supplied after background detection finishes.
@@ -291,17 +385,16 @@ class SettingsPage(QWidget):
 
         self.encoder_box = QComboBox()
 
+        self.encoder_box.currentIndexChanged.connect(
+            self.update_minimum_target_size
+        )
+
         self.gpu_encoding_checkbox.toggled.connect(
             self.update_encoder_options
         )
 
         # Start with CPU encoders while detection runs.
         self.update_encoder_options()
-
-        self.encoder_box.addItem(
-            "H.265 — smaller files",
-            "libx265",
-        )
 
         self.preset_box = QComboBox()
 
@@ -401,6 +494,10 @@ class SettingsPage(QWidget):
             self.update_custom_resolution_visibility
         )
 
+        self.resolution_box.currentIndexChanged.connect(
+            self.update_minimum_target_size
+        )
+
         settings_form.addRow(
             "Frame rate:",
             self.fps_box,
@@ -412,8 +509,18 @@ class SettingsPage(QWidget):
         )
 
         settings_form.addRow(
-            "Quality:",
+            "Size control:",
+            self.rate_control_box,
+        )
+
+        settings_form.addRow(
+            self.quality_label,
             self.quality_widget,
+        )
+
+        settings_form.addRow(
+            self.target_size_label,
+            self.target_size_widget,
         )
 
         settings_form.addRow(
@@ -620,10 +727,16 @@ class SettingsPage(QWidget):
 
         self.update_custom_resolution_visibility()
         self.update_custom_fps_visibility()
+        self.update_rate_control_visibility()
 
     # -- Video and Output Selection --
 
-    def set_video(self, file_path):
+    def set_video(
+        self,
+        file_path,
+        duration=None,
+        source_fps=None,
+    ):
         """Display the input and suggest an output location."""
 
         new_input_path = Path(file_path)
@@ -635,6 +748,9 @@ class SettingsPage(QWidget):
         self.video_name.setText(
             new_input_path.name
         )
+
+        self.video_duration = duration
+        self.source_fps = source_fps
 
         # Preserve the user's choices when returning to the settings page for
         # the same video, but create fresh defaults for a newly selected video.
@@ -651,6 +767,7 @@ class SettingsPage(QWidget):
             )
 
         self.update_output_path_preview()
+        self.update_minimum_target_size()
 
     def browse_output_folder(self):
         """Ask the user where the rendered video should be saved."""
@@ -773,6 +890,28 @@ class SettingsPage(QWidget):
 
     # -- Setting Values and Visibility --
 
+    def update_rate_control_visibility(self):
+        """Show controls for the selected rate-control mode."""
+
+        target_size_selected = (
+            self.rate_control_box.currentData()
+            == "target_size"
+        )
+
+        self.quality_label.setVisible(
+            not target_size_selected
+        )
+        self.quality_widget.setVisible(
+            not target_size_selected
+        )
+
+        self.target_size_label.setVisible(
+            target_size_selected
+        )
+        self.target_size_widget.setVisible(
+            target_size_selected
+        )
+
     def update_custom_resolution_visibility(self):
         """Show custom dimensions only when Custom is selected."""
 
@@ -797,6 +936,62 @@ class SettingsPage(QWidget):
         self.quality_value.setText(
             str(value)
         )
+
+
+    def update_minimum_target_size(
+        self,
+        _value=None,
+    ):
+        """Update the estimated minimum for the current settings."""
+
+        if (
+            self.video_duration is None
+            or self.source_fps is None
+        ):
+            self.minimum_size_label.setText(
+                "Estimated minimum: —"
+            )
+            return
+
+        try:
+            width, height = self.get_resolution()
+
+        except ValueError:
+            self.minimum_size_label.setText(
+                "Estimated minimum: —"
+            )
+            return
+
+        selected_fps = self.get_fps()
+
+        effective_fps = (
+            selected_fps
+            if selected_fps is not None
+            else self.source_fps
+        )
+
+        encoder = self.encoder_box.currentData()
+
+        minimum_size = (
+            calculate_minimum_target_size_mb(
+                duration=self.video_duration,
+                width=width,
+                height=height,
+                fps=effective_fps,
+                encoder=encoder,
+            )
+        )
+
+        if minimum_size is None:
+            self.minimum_size_label.setText(
+                "Estimated minimum: not available"
+            )
+            return
+
+        self.minimum_size_label.setText(
+            f"Estimated minimum: {minimum_size:.1f} MB"
+        )
+
 
     def get_fps(self):
         """Return None to preserve FPS, or the selected numeric value."""
@@ -832,10 +1027,28 @@ class SettingsPage(QWidget):
 
         width, height = self.get_resolution()
 
+        rate_control = (
+            self.rate_control_box.currentData()
+        )
+
+        target_size_mb = None
+
+        if rate_control == "target_size":
+            target_size_mb = (
+                self.target_size_box.value()
+            )
+
+            if target_size_mb <= 0:
+                raise ValueError(
+                    "Target file size must be greater than zero."
+                )
+
         return {
             "resolution": (width, height),
             "fps": self.get_fps(),
+            "rate_control": rate_control,
             "quality": self.quality_slider.value(),
+            "target_size_mb": target_size_mb,
             "encoder": self.encoder_box.currentData(),
             "preset": self.preset_box.currentData(),
             "output_path": self.get_output_path(),
@@ -1023,10 +1236,6 @@ class SettingsPage(QWidget):
                 "H.264 — CPU, best compatibility",
                 "libx264",
             )
-            self.encoder_box.addItem(
-                "H.265 — CPU, smaller files",
-                "libx265",
-            )
 
         # Restore the previously selected codec where possible.
         for index in range(
@@ -1050,3 +1259,4 @@ class SettingsPage(QWidget):
                 break
 
         self.encoder_box.blockSignals(False)
+        self.update_minimum_target_size()

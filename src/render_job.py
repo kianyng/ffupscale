@@ -30,10 +30,13 @@ class RenderJob:
     width: int
     height: int
     quality: int
+    rate_control: str
+    target_size_mb: Optional[float]
     fps: Optional[float]
     encoder: str
     preset: str
     duration: float
+    source_fps: float
 
     job_id: str = field(
         default_factory=lambda: uuid4().hex
@@ -52,6 +55,7 @@ class RenderJob:
         input_path,
         duration,
         settings,
+        source_fps,
     ):
         """Create a job from settings collected by SettingsPage."""
 
@@ -65,10 +69,13 @@ class RenderJob:
             width=width,
             height=height,
             quality=settings["quality"],
+            rate_control=settings["rate_control"],
+            target_size_mb=settings["target_size_mb"],
             fps=settings["fps"],
             encoder=settings["encoder"],
             preset=settings["preset"],
             duration=duration,
+            source_fps=source_fps,
         )
 
     # -- Display Helpers --
