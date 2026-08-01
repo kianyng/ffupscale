@@ -540,12 +540,34 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        # Right side: properties followed by Continue button
+        # Keep the Continue and Queue buttons close together.
+        button_layout = QVBoxLayout()
+        button_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+        button_layout.setSpacing(10)
+
+        button_layout.addWidget(
+            self.continue_button
+        )
+
+        button_layout.addWidget(
+            self.queue_view_button
+        )
+
+        # Right side: properties followed by navigation buttons.
         right_layout = QVBoxLayout()
-        right_layout.addLayout(properties_layout)
         right_layout.addStretch()
-        right_layout.addWidget(self.continue_button)
-        right_layout.addWidget(self.queue_view_button)
+        right_layout.addLayout(
+            properties_layout
+        )
+        right_layout.addLayout(
+            button_layout
+        )
+        right_layout.addStretch()
 
         # Drop area on the left, information on the right
         content_layout = QHBoxLayout()
