@@ -461,6 +461,7 @@ class MainWindow(QMainWindow):
         self.selected_video = None
 
         self.video_duration = 0.0
+        self.video_fps = 0.0
 
         self.setWindowTitle("ffupscale")
         self.resize(975, 555)
@@ -657,6 +658,8 @@ class MainWindow(QMainWindow):
         try:
             properties = read_video_properties(file_path)
 
+            self.video_fps = properties["fps"]
+
             self.video_duration = properties["duration"]
 
             file_size_mb = properties["file_size"] / (1024 * 1024)
@@ -706,7 +709,11 @@ class MainWindow(QMainWindow):
             self.show_error("Select a video first.")
             return
 
-        self.settings_page.set_video(self.selected_video)
+        self.settings_page.set_video(
+            self.selected_video,
+            duration=self.video_duration,
+            source_fps=self.video_fps,
+        )
 
         self.pages.setCurrentWidget(self.settings_page)
 
@@ -1068,6 +1075,7 @@ class MainWindow(QMainWindow):
         job = RenderJob.from_settings(
             input_path=self.selected_video,
             duration=self.video_duration,
+            source_fps=self.video_fps,
             settings=settings,
         )
 
@@ -1110,6 +1118,10 @@ class MainWindow(QMainWindow):
                     fps=job.fps,
                     encoder=job.encoder,
                     preset=job.preset,
+                    rate_control=job.rate_control,
+                    target_size_mb=job.target_size_mb,
+                    duration=job.duration,
+                    source_fps=job.source_fps,
                 )
             )
 
