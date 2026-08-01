@@ -41,18 +41,19 @@
   >
 </p>
 
-<!--
-Add your demonstration GIF to assets/ffupscale-demo.gif,
-then remove these comment markers.
-
 <p align="center">
   <img
     src="assets/ffupscale-demo.gif"
-    alt="Demonstration of ffupscale"
-    width="800"
+    alt="Selecting a video in ffupscale"
+    width="48%"
+  >
+  &nbsp;
+  <img
+    src="assets/ffupscale-demo2.gif"
+    alt="Settings menu in ffupscale"
+    width="48%"
   >
 </p>
--->
 
 ## About
 
