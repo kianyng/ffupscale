@@ -462,6 +462,8 @@ class MainWindow(QMainWindow):
 
         self.video_duration = 0.0
         self.video_fps = 0.0
+        self.video_width = 0
+        self.video_height = 0
 
         self.setWindowTitle("ffupscale")
         self.resize(975, 555)
@@ -540,12 +542,34 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        # Right side: properties followed by Continue button
+        # Keep the Continue and Queue buttons close together.
+        button_layout = QVBoxLayout()
+        button_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+        button_layout.setSpacing(10)
+
+        button_layout.addWidget(
+            self.continue_button
+        )
+
+        button_layout.addWidget(
+            self.queue_view_button
+        )
+
+        # Right side: properties followed by navigation buttons.
         right_layout = QVBoxLayout()
-        right_layout.addLayout(properties_layout)
         right_layout.addStretch()
-        right_layout.addWidget(self.continue_button)
-        right_layout.addWidget(self.queue_view_button)
+        right_layout.addLayout(
+            properties_layout
+        )
+        right_layout.addLayout(
+            button_layout
+        )
+        right_layout.addStretch()
 
         # Drop area on the left, information on the right
         content_layout = QHBoxLayout()
@@ -581,6 +605,9 @@ class MainWindow(QMainWindow):
         self.current_job = None
 
         self.queue_page = QueuePage()
+
+        # Page to return to when leaving the queue.
+        self.queue_return_page = self.file_page
 
         self.start_encoder_detection()
 
@@ -618,12 +645,16 @@ class MainWindow(QMainWindow):
             self.add_to_queue
         )
 
+        self.settings_page.view_queue_requested.connect(
+            self.open_queue_page
+        )
+
         self.queue_view_button.clicked.connect(
             self.open_queue_page
         )
 
         self.queue_page.back_requested.connect(
-            self.open_file_page
+            self.close_queue_page
         )
 
         self.queue_page.remove_job_requested.connect(
@@ -657,6 +688,10 @@ class MainWindow(QMainWindow):
 
         try:
             properties = read_video_properties(file_path)
+
+            self.video_width = properties["width"]
+
+            self.video_height = properties["height"]
 
             self.video_fps = properties["fps"]
 
@@ -713,6 +748,8 @@ class MainWindow(QMainWindow):
             self.selected_video,
             duration=self.video_duration,
             source_fps=self.video_fps,
+            source_width=self.video_width,
+            source_height=self.video_height,
         )
 
         self.pages.setCurrentWidget(self.settings_page)
@@ -757,9 +794,7 @@ class MainWindow(QMainWindow):
 
             self.start_job(job)
 
-            self.pages.setCurrentWidget(
-                self.queue_page
-            )
+            self.open_queue_page()
 
         except (
             FileNotFoundError,
@@ -1009,11 +1044,8 @@ class MainWindow(QMainWindow):
             )
 
             self.render_queue.add(job)
-            self.refresh_queue_page()
 
-            self.pages.setCurrentWidget(
-                self.queue_page
-            )
+            self.open_queue_page()
 
         except (
             KeyError,
@@ -1024,12 +1056,36 @@ class MainWindow(QMainWindow):
 
 
     def open_queue_page(self):
-        """Show the render queue."""
+        """Open the queue and remember which page requested it."""
+
+        current_page = self.pages.currentWidget()
+
+        if current_page is not self.queue_page:
+            self.queue_return_page = current_page
 
         self.refresh_queue_page()
 
         self.pages.setCurrentWidget(
             self.queue_page
+        )
+
+
+    def close_queue_page(self):
+        """Return to the page that opened the queue."""
+
+        valid_return_pages = {
+            self.file_page,
+            self.settings_page,
+        }
+
+        if (
+            self.queue_return_page
+            not in valid_return_pages
+        ):
+            self.queue_return_page = self.file_page
+
+        self.pages.setCurrentWidget(
+            self.queue_return_page
         )
 
 

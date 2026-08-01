@@ -119,7 +119,34 @@ SUPPORTED_ENCODERS = set(ENCODER_PROFILES)
 TARGET_AUDIO_BITRATE = 128_000
 CONTAINER_OVERHEAD_RATIO = 0.02
 MINIMUM_VIDEO_BITRATE = 500_000
-MINIMUM_NVENC_BITS_PER_PIXEL = 0.011
+# Approximate bits required for each output pixel per frame.
+#
+# CPU values represent a recommended quality floor. Hardware values
+# estimate where the encoder may stop obeying lower bitrate requests.
+MINIMUM_BITS_PER_PIXEL = {
+    # CPU
+    "libx264": 0.007,
+    "libx265": 0.004,
+
+    # NVIDIA NVENC
+    "h264_nvenc": 0.011,
+    "hevc_nvenc": 0.006,
+
+    # AMD AMF — provisional until tested on AMD hardware
+    "h264_amf": 0.011,
+    "hevc_amf": 0.006,
+
+    # Intel Quick Sync — provisional until tested on Intel hardware
+    "h264_qsv": 0.011,
+    "hevc_qsv": 0.006,
+}
+
+
+# Only tested NVENC estimates should currently block a render.
+ENFORCED_MINIMUM_ENCODERS = {
+    "h264_nvenc",
+    "hevc_nvenc",
+}
 
 
 def calculate_minimum_target_size_mb(
@@ -130,9 +157,10 @@ def calculate_minimum_target_size_mb(
     encoder,
 ):
     """
-    Estimate the smallest target NVENC is likely to reach.
+    Estimate a practical minimum output size.
 
-    Returns None when no estimate is available for the encoder.
+    Hardware estimates approximate the encoder's bitrate floor.
+    CPU estimates represent a recommended quality floor.
     """
 
     if (
@@ -140,22 +168,18 @@ def calculate_minimum_target_size_mb(
         or duration <= 0
         or fps is None
         or fps <= 0
+        or width <= 0
+        or height <= 0
     ):
         return None
 
-    if encoder == "h264_nvenc":
-        bits_per_pixel = (
-            MINIMUM_NVENC_BITS_PER_PIXEL
+    bits_per_pixel = (
+        MINIMUM_BITS_PER_PIXEL.get(
+            encoder
         )
+    )
 
-    elif encoder == "hevc_nvenc":
-        bits_per_pixel = (
-            MINIMUM_NVENC_BITS_PER_PIXEL
-            * 0.6
-        )
-
-    else:
-        # We currently only have a tested estimate for NVENC.
+    if bits_per_pixel is None:
         return None
 
     minimum_video_bitrate = int(
@@ -267,7 +291,8 @@ def calculate_target_video_bitrate(
     )
 
     if (
-        minimum_target_size_mb is not None
+        encoder in ENFORCED_MINIMUM_ENCODERS
+        and minimum_target_size_mb is not None
         and target_size_mb < minimum_target_size_mb
     ):
         raise ValueError(

@@ -35,6 +35,7 @@ class SettingsPage(QWidget):
     render_requested = pyqtSignal(dict)
     cancel_requested = pyqtSignal()
     queue_requested = pyqtSignal(dict)
+    view_queue_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -45,6 +46,8 @@ class SettingsPage(QWidget):
         self.input_path = None
         self.video_duration = None
         self.source_fps = None
+        self.source_width = None
+        self.source_height = None
 
         # -- Page Header --
 
@@ -55,6 +58,53 @@ class SettingsPage(QWidget):
             font-weight: bold;
         """)
 
+        self.view_queue_button = QPushButton(
+            "View queue"
+        )
+
+        self.view_queue_button.setFixedWidth(110)
+
+        self.view_queue_button.setStyleSheet("""
+            QPushButton {
+                font-size: 13px;
+                font-weight: bold;
+                padding: 6px;
+            }
+        """)
+
+        self.view_queue_button.clicked.connect(
+            self.view_queue_requested.emit
+        )
+
+        # A matching spacer keeps the title centred in the page,
+        # rather than centred only in the remaining space.
+        header_spacer = QWidget()
+        header_spacer.setFixedWidth(
+            self.view_queue_button.width()
+        )
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+        header_layout.setSpacing(10)
+
+        header_layout.addWidget(
+            header_spacer
+        )
+
+        header_layout.addWidget(
+            title,
+            stretch=1,
+        )
+
+        header_layout.addWidget(
+            self.view_queue_button
+        )
+
         self.video_name = QLabel("No video selected")
         self.video_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -62,6 +112,12 @@ class SettingsPage(QWidget):
 
         self.resolution_box = QComboBox()
         # Item data holds the actual dimensions used by FFmpeg.
+        
+        self.resolution_box.addItem(
+            "Same as source",
+            "source",
+        )
+        
         self.resolution_box.addItem(
             "1280 × 720",
             (1280, 720),
@@ -711,8 +767,13 @@ class SettingsPage(QWidget):
         layout.setContentsMargins(30, 20, 30, 30)
         layout.setSpacing(20)
 
-        layout.addWidget(title)
-        layout.addWidget(self.video_name)
+        layout.addLayout(
+            header_layout
+        )
+
+        layout.addWidget(
+            self.video_name
+        )
 
         # The form expands into the available space and becomes scrollable
         # when the window is not tall enough.
@@ -736,24 +797,51 @@ class SettingsPage(QWidget):
         file_path,
         duration=None,
         source_fps=None,
+        source_width=None,
+        source_height=None,
     ):
         """Display the input and suggest an output location."""
 
         new_input_path = Path(file_path)
+
         video_changed = (
-            new_input_path != self.input_path
+            new_input_path
+            != self.input_path
         )
 
         self.input_path = new_input_path
+
         self.video_name.setText(
             new_input_path.name
         )
 
         self.video_duration = duration
         self.source_fps = source_fps
+        self.source_width = source_width
+        self.source_height = source_height
 
-        # Preserve the user's choices when returning to the settings page for
-        # the same video, but create fresh defaults for a newly selected video.
+        # Display the actual dimensions in the Same as source option.
+        source_index = (
+            self.resolution_box.findData(
+                "source"
+            )
+        )
+
+        if (
+            source_index >= 0
+            and source_width is not None
+            and source_height is not None
+        ):
+            self.resolution_box.setItemText(
+                source_index,
+                (
+                    "Same as source  "
+                    f"({source_width} × {source_height})"
+                ),
+            )
+
+        # Preserve the user's choices when returning to the settings page
+        # for the same video, but create defaults for a new video.
         if (
             video_changed
             or not self.output_folder_edit.text()
@@ -988,8 +1076,40 @@ class SettingsPage(QWidget):
             )
             return
 
+        if encoder in {
+            "libx264",
+            "libx265",
+        }:
+            label_text = (
+                f"Recommended minimum: "
+                f"{minimum_size:.1f} MB"
+            )
+
+        elif encoder in {
+            "h264_amf",
+            "hevc_amf",
+            "h264_qsv",
+            "hevc_qsv",
+        }:
+            label_text = (
+                f"Estimated minimum: "
+                f"{minimum_size:.1f} MB*"
+            )
+
+        else:
+            label_text = (
+                f"Estimated minimum: "
+                f"{minimum_size:.1f} MB"
+            )
+
         self.minimum_size_label.setText(
-            f"Estimated minimum: {minimum_size:.1f} MB"
+            label_text
+        )
+
+        self.minimum_size_label.setToolTip(
+            "This is an estimate based on the codec, resolution and "
+            "frame rate. Actual requirements depend on the video content. "
+            "AMD and Intel estimates are provisional."
         )
 
 
@@ -1007,18 +1127,40 @@ class SettingsPage(QWidget):
         return selected_fps
 
     def get_resolution(self):
-        """Return validated output dimensions from the preset or custom inputs."""
+        """Return validated output dimensions."""
 
-        preset_resolution = self.resolution_box.currentData()
+        selected_resolution = (
+            self.resolution_box.currentData()
+        )
 
-        if preset_resolution is not None:
-            return preset_resolution
+        if selected_resolution == "source":
+            if (
+                self.source_width is None
+                or self.source_height is None
+            ):
+                raise ValueError(
+                    "The source resolution is not available."
+                )
 
+            return (
+                self.source_width,
+                self.source_height,
+            )
+
+        if selected_resolution is not None:
+            return selected_resolution
+
+        # None represents the Custom option.
         width = self.custom_width.value()
         height = self.custom_height.value()
 
-        if width % 2 != 0 or height % 2 != 0:
-            raise ValueError("Width and height must both be even numbers.")
+        if (
+            width % 2 != 0
+            or height % 2 != 0
+        ):
+            raise ValueError(
+                "Width and height must both be even numbers."
+            )
 
         return width, height
 
