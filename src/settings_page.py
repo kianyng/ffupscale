@@ -1041,8 +1041,40 @@ class SettingsPage(QWidget):
             )
             return
 
+        if encoder in {
+            "libx264",
+            "libx265",
+        }:
+            label_text = (
+                f"Recommended minimum: "
+                f"{minimum_size:.1f} MB"
+            )
+
+        elif encoder in {
+            "h264_amf",
+            "hevc_amf",
+            "h264_qsv",
+            "hevc_qsv",
+        }:
+            label_text = (
+                f"Estimated minimum: "
+                f"{minimum_size:.1f} MB*"
+            )
+
+        else:
+            label_text = (
+                f"Estimated minimum: "
+                f"{minimum_size:.1f} MB"
+            )
+
         self.minimum_size_label.setText(
-            f"Estimated minimum: {minimum_size:.1f} MB"
+            label_text
+        )
+
+        self.minimum_size_label.setToolTip(
+            "This is an estimate based on the codec, resolution and "
+            "frame rate. Actual requirements depend on the video content. "
+            "AMD and Intel estimates are provisional."
         )
 
 
