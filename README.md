@@ -42,10 +42,10 @@ Do not run the application directly from inside the ZIP or move
 - Custom output location
 - Additional hardware encoders
 - Render queue
+- Target file size and compression
 
 ## Planned features
 
-- Target file size and compression
 - Video trimmer
 
 ## Requirements
