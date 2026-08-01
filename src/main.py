@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import QApplication
 
 from ui import MainWindow
 
-
 # -- Resource Paths --
+
 
 def resource_path(*parts):
     """Return an asset path that works in source and PyInstaller builds."""
@@ -23,6 +23,7 @@ def resource_path(*parts):
 
 
 # -- Application Startup --
+
 
 def main():
     """Configure Qt and start the ffupscale application."""

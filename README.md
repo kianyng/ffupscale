@@ -13,7 +13,8 @@
 FFmpeg normally requires a command prompt, terminal, or batch file. ffupscale provides a native Windows interface with drag-and-drop video selection and customisable encoding settings.
 
 > [!NOTE]
-> ffupscale is currently in beta. Bugs and incomplete features should be expected.
+> ffupscale is currently a release candidate. Bugs and incomplete features may
+> still be present before the final v1.0.0 release.
 
 ## Download
 
@@ -40,9 +41,9 @@ Do not run the application directly from inside the ZIP or move
 - Render cancellation
 - Bundled FFmpeg and FFprobe in the packaged Windows build
 - Custom output location
-- Additional hardware encoders
+- Automatic CPU or GPU encoding with supported NVIDIA, AMD, and Intel encoders
 - Render queue
-- Target file size and compression
+- Quality-based encoding or target file size compression
 
 ## Planned features
 
@@ -74,7 +75,7 @@ checklist.
 
 ## Third-party software
 
-Packaged releases include the unmodified FFmpeg 7.1.1 full Windows build,
+Packaged releases include the unmodified FFmpeg 8.1.2 full Windows build,
 licensed under GPLv3. See [Third-Party Notices](THIRD_PARTY_NOTICES.md), the
 [complete GPLv3 text](licenses/GPL-3.0.txt), and the
 [bundled-build record](licenses/FFmpeg-BUILD-INFO.txt) for licensing, source,
