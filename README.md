@@ -17,7 +17,7 @@ FFmpeg normally requires a command prompt, terminal, or batch file. ffupscale pr
 
 ## Download
 
-[Download ffupscale v0.1.0 Beta 5](https://github.com/kianyng/ffupscale/releases/tag/v0.1.0-beta.5)
+[Download ffupscale v1.0.0 Release Candidate 1](https://github.com/kianyng/ffupscale/releases/tag/v0.1.0-rc.1)
 
 After downloading:
 

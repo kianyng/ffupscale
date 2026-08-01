@@ -63,7 +63,7 @@ Test the package from `release-folder\ffupscale`. Confirm that:
 ## Create the ZIP
 
 ```powershell
-Compress-Archive -Path release-folder\ffupscale -DestinationPath ffupscale-v0.1.0-beta.5-windows-x64.zip -Force
+Compress-Archive -Path release-folder\ffupscale -DestinationPath ffupscale-v1.0.0-rc.1-windows-x64.zip -Force
 ```
 
 Update the version in the ZIP filename for each release. Users must extract the
