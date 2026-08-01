@@ -462,6 +462,8 @@ class MainWindow(QMainWindow):
 
         self.video_duration = 0.0
         self.video_fps = 0.0
+        self.video_width = 0
+        self.video_height = 0
 
         self.setWindowTitle("ffupscale")
         self.resize(975, 555)
@@ -687,6 +689,10 @@ class MainWindow(QMainWindow):
         try:
             properties = read_video_properties(file_path)
 
+            self.video_width = properties["width"]
+
+            self.video_height = properties["height"]
+
             self.video_fps = properties["fps"]
 
             self.video_duration = properties["duration"]
@@ -742,6 +748,8 @@ class MainWindow(QMainWindow):
             self.selected_video,
             duration=self.video_duration,
             source_fps=self.video_fps,
+            source_width=self.video_width,
+            source_height=self.video_height,
         )
 
         self.pages.setCurrentWidget(self.settings_page)
