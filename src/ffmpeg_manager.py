@@ -1,7 +1,6 @@
 import shutil
 import subprocess
 import sys
-
 from functools import lru_cache
 from pathlib import Path
 
@@ -24,6 +23,7 @@ HARDWARE_ENCODERS = {
 
 # -- FFmpeg Paths --
 
+
 def bundled_bin_directory():
     """
     Return the directory containing the bundled FFmpeg programs.
@@ -35,12 +35,7 @@ def bundled_bin_directory():
         return base_directory / "bin"
 
     # Location used when running directly from the repository.
-    return (
-        Path(__file__).resolve().parent.parent
-        / "vendor"
-        / "ffmpeg"
-        / "bin"
-    )
+    return Path(__file__).resolve().parent.parent / "vendor" / "ffmpeg" / "bin"
 
 
 def find_program(name):
@@ -48,16 +43,9 @@ def find_program(name):
     Look for a bundled executable first, then check system PATH.
     """
 
-    executable_name = (
-        f"{name}.exe"
-        if sys.platform == "win32"
-        else name
-    )
+    executable_name = f"{name}.exe" if sys.platform == "win32" else name
 
-    bundled_path = (
-        bundled_bin_directory()
-        / executable_name
-    )
+    bundled_path = bundled_bin_directory() / executable_name
 
     if bundled_path.is_file():
         return str(bundled_path)
@@ -71,9 +59,7 @@ def find_ffmpeg():
     ffmpeg_path = find_program("ffmpeg")
 
     if ffmpeg_path is None:
-        raise FileNotFoundError(
-            "FFmpeg could not be found."
-        )
+        raise FileNotFoundError("FFmpeg could not be found.")
 
     return ffmpeg_path
 
@@ -84,9 +70,7 @@ def find_ffprobe():
     ffprobe_path = find_program("ffprobe")
 
     if ffprobe_path is None:
-        raise FileNotFoundError(
-            "FFprobe could not be found."
-        )
+        raise FileNotFoundError("FFprobe could not be found.")
 
     return ffprobe_path
 
@@ -94,12 +78,11 @@ def find_ffprobe():
 def ffmpeg_is_available():
     """Return whether both FFmpeg programs are available."""
 
-    return (
-        find_program("ffmpeg") is not None
-        and find_program("ffprobe") is not None
-    )
+    return find_program("ffmpeg") is not None and find_program("ffprobe") is not None
+
 
 # -- Process Helpers --
+
 
 def hidden_process_flags():
     """Prevent FFmpeg subprocesses from opening a console on Windows."""
@@ -111,6 +94,7 @@ def hidden_process_flags():
 
 
 # -- Hardware Encoder Detection --
+
 
 @lru_cache(maxsize=1)
 def get_compiled_video_encoders():
@@ -168,13 +152,11 @@ def encoder_is_usable(encoder):
         "-hide_banner",
         "-loglevel",
         "error",
-
         # Generate a tiny frame entirely in memory.
         "-f",
         "lavfi",
         "-i",
         "color=c=black:s=640x360:r=1",
-
         # Encode only one silent frame.
         "-frames:v",
         "1",
@@ -183,7 +165,6 @@ def encoder_is_usable(encoder):
         encoder,
         "-pix_fmt",
         "yuv420p",
-
         # Discard the encoded result.
         "-f",
         "null",
@@ -197,6 +178,7 @@ def encoder_is_usable(encoder):
             text=True,
             encoding="utf-8",
             errors="replace",
+            check=False,
             timeout=15,
             creationflags=hidden_process_flags(),
         )
@@ -205,6 +187,7 @@ def encoder_is_usable(encoder):
         return False
 
     return result.returncode == 0
+
 
 @lru_cache(maxsize=1)
 def detect_hardware_encoders():

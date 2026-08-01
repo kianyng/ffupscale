@@ -2,30 +2,30 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSlider,
     QSpinBox,
     QVBoxLayout,
     QWidget,
-    QSlider,
-    QFileDialog,
-    QLineEdit,
-    QMessageBox,
-    QCheckBox,
 )
 
 from ffmpeg_runner import (
     calculate_minimum_target_size_mb,
 )
 
-
 # -- Settings Page --
+
 
 class SettingsPage(QWidget):
     """Collect encoding settings and report user actions to MainWindow."""
@@ -58,9 +58,7 @@ class SettingsPage(QWidget):
             font-weight: bold;
         """)
 
-        self.view_queue_button = QPushButton(
-            "View queue"
-        )
+        self.view_queue_button = QPushButton("View queue")
 
         self.view_queue_button.setFixedWidth(110)
 
@@ -72,16 +70,12 @@ class SettingsPage(QWidget):
             }
         """)
 
-        self.view_queue_button.clicked.connect(
-            self.view_queue_requested.emit
-        )
+        self.view_queue_button.clicked.connect(self.view_queue_requested.emit)
 
         # A matching spacer keeps the title centred in the page,
         # rather than centred only in the remaining space.
         header_spacer = QWidget()
-        header_spacer.setFixedWidth(
-            self.view_queue_button.width()
-        )
+        header_spacer.setFixedWidth(self.view_queue_button.width())
 
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(
@@ -92,18 +86,14 @@ class SettingsPage(QWidget):
         )
         header_layout.setSpacing(10)
 
-        header_layout.addWidget(
-            header_spacer
-        )
+        header_layout.addWidget(header_spacer)
 
         header_layout.addWidget(
             title,
             stretch=1,
         )
 
-        header_layout.addWidget(
-            self.view_queue_button
-        )
+        header_layout.addWidget(self.view_queue_button)
 
         self.video_name = QLabel("No video selected")
         self.video_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -112,12 +102,12 @@ class SettingsPage(QWidget):
 
         self.resolution_box = QComboBox()
         # Item data holds the actual dimensions used by FFmpeg.
-        
+
         self.resolution_box.addItem(
             "Same as source",
             "source",
         )
-        
+
         self.resolution_box.addItem(
             "1280 × 720",
             (1280, 720),
@@ -155,13 +145,9 @@ class SettingsPage(QWidget):
         self.custom_height.setSuffix(" px")
         self.custom_height.setSingleStep(2)
 
-        self.custom_width.valueChanged.connect(
-            self.update_minimum_target_size
-        )
+        self.custom_width.valueChanged.connect(self.update_minimum_target_size)
 
-        self.custom_height.valueChanged.connect(
-            self.update_minimum_target_size
-        )
+        self.custom_height.valueChanged.connect(self.update_minimum_target_size)
 
         custom_resolution_layout = QHBoxLayout()
         custom_resolution_layout.setContentsMargins(0, 0, 0, 0)
@@ -225,17 +211,11 @@ class SettingsPage(QWidget):
 
         self.custom_fps_label = QLabel("Custom frame rate:")
 
-        self.fps_box.currentIndexChanged.connect(
-            self.update_custom_fps_visibility
-        )
+        self.fps_box.currentIndexChanged.connect(self.update_custom_fps_visibility)
 
-        self.fps_box.currentIndexChanged.connect(
-            self.update_minimum_target_size
-        )
+        self.fps_box.currentIndexChanged.connect(self.update_minimum_target_size)
 
-        self.custom_fps.valueChanged.connect(
-            self.update_minimum_target_size
-        )
+        self.custom_fps.valueChanged.connect(self.update_minimum_target_size)
 
         # -- Rate Control Settings --
 
@@ -259,9 +239,7 @@ class SettingsPage(QWidget):
 
         # The UI presents higher values as better quality. The FFmpeg backend
         # translates this value for the selected CPU or hardware encoder.
-        self.quality_slider = QSlider(
-            Qt.Orientation.Horizontal
-        )
+        self.quality_slider = QSlider(Qt.Orientation.Horizontal)
         self.quality_slider.setRange(1, 51)
         self.quality_slider.setValue(30)
         self.quality_slider.setSingleStep(1)
@@ -307,17 +285,11 @@ class SettingsPage(QWidget):
             }
         """)
 
-        self.quality_value = QLabel(
-            str(self.quality_slider.value())
-        )
-        self.quality_value.setAlignment(
-            Qt.AlignmentFlag.AlignCenter
-        )
+        self.quality_value = QLabel(str(self.quality_slider.value()))
+        self.quality_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.quality_value.setMinimumWidth(25)
 
-        self.quality_slider.valueChanged.connect(
-            self.update_quality_display
-        )
+        self.quality_slider.valueChanged.connect(self.update_quality_display)
 
         quality_controls_layout = QHBoxLayout()
         quality_controls_layout.setContentsMargins(
@@ -332,13 +304,9 @@ class SettingsPage(QWidget):
             self.quality_slider,
             stretch=1,
         )
-        quality_controls_layout.addWidget(
-            self.quality_value
-        )
+        quality_controls_layout.addWidget(self.quality_value)
 
-        quality_help = QLabel(
-            "1: lowest quality · 30: balanced · 51: best quality"
-        )
+        quality_help = QLabel("1: lowest quality · 30: balanced · 51: best quality")
         quality_help.setStyleSheet("""
             color: #999999;
             font-size: 11px;
@@ -352,17 +320,11 @@ class SettingsPage(QWidget):
             0,
         )
         quality_widget_layout.setSpacing(4)
-        quality_widget_layout.addLayout(
-            quality_controls_layout
-        )
-        quality_widget_layout.addWidget(
-            quality_help
-        )
+        quality_widget_layout.addLayout(quality_controls_layout)
+        quality_widget_layout.addWidget(quality_help)
 
         self.quality_widget = QWidget()
-        self.quality_widget.setLayout(
-            quality_widget_layout
-        )
+        self.quality_widget.setLayout(quality_widget_layout)
 
         # -- Target File Size Settings --
 
@@ -373,9 +335,7 @@ class SettingsPage(QWidget):
         self.target_size_box.setSingleStep(10.0)
         self.target_size_box.setSuffix(" MB")
 
-        self.minimum_size_label = QLabel(
-            "Estimated minimum: —"
-        )
+        self.minimum_size_label = QLabel("Estimated minimum: —")
 
         self.minimum_size_label.setStyleSheet("""
             color: #999999;
@@ -391,49 +351,35 @@ class SettingsPage(QWidget):
         )
         target_size_layout.setSpacing(10)
 
-        target_size_layout.addWidget(
-            self.target_size_box
-        )
+        target_size_layout.addWidget(self.target_size_box)
 
-        target_size_layout.addWidget(
-            self.minimum_size_label
-        )
+        target_size_layout.addWidget(self.minimum_size_label)
 
         target_size_layout.addStretch()
 
         self.target_size_widget = QWidget()
-        self.target_size_widget.setLayout(
-            target_size_layout
-        )
+        self.target_size_widget.setLayout(target_size_layout)
 
         self.target_size_box.setToolTip(
             "The finished file will be approximately this size."
         )
 
-        self.target_size_label = QLabel(
-            "Target size:"
-        )
+        self.target_size_label = QLabel("Target size:")
 
-        self.quality_label = QLabel(
-            "Quality:"
-        )
+        self.quality_label = QLabel("Quality:")
 
         # -- Encoder Settings --
 
         # Hardware encoders are supplied after background detection finishes.
         self.hardware_encoders = {}
 
-        self.gpu_encoding_checkbox = QCheckBox(
-            "Use GPU encoding"
-        )
+        self.gpu_encoding_checkbox = QCheckBox("Use GPU encoding")
         self.gpu_encoding_checkbox.setEnabled(False)
         self.gpu_encoding_checkbox.setToolTip(
             "Checking for supported hardware encoders."
         )
 
-        self.gpu_status = QLabel(
-            "Detecting GPU encoding support..."
-        )
+        self.gpu_status = QLabel("Detecting GPU encoding support...")
         self.gpu_status.setStyleSheet("""
             color: #999999;
             font-size: 11px;
@@ -441,13 +387,9 @@ class SettingsPage(QWidget):
 
         self.encoder_box = QComboBox()
 
-        self.encoder_box.currentIndexChanged.connect(
-            self.update_minimum_target_size
-        )
+        self.encoder_box.currentIndexChanged.connect(self.update_minimum_target_size)
 
-        self.gpu_encoding_checkbox.toggled.connect(
-            self.update_encoder_options
-        )
+        self.gpu_encoding_checkbox.toggled.connect(self.update_encoder_options)
 
         # Start with CPU encoders while detection runs.
         self.update_encoder_options()
@@ -476,16 +418,10 @@ class SettingsPage(QWidget):
         # Output folder
         self.output_folder_edit = QLineEdit()
         self.output_folder_edit.setReadOnly(True)
-        self.output_folder_edit.setPlaceholderText(
-            "Select an output folder"
-        )
+        self.output_folder_edit.setPlaceholderText("Select an output folder")
 
-        self.output_browse_button = QPushButton(
-            "Browse"
-        )
-        self.output_browse_button.clicked.connect(
-            self.browse_output_folder
-        )
+        self.output_browse_button = QPushButton("Browse")
+        self.output_browse_button.clicked.connect(self.browse_output_folder)
 
         output_folder_layout = QHBoxLayout()
         output_folder_layout.setContentsMargins(
@@ -504,15 +440,11 @@ class SettingsPage(QWidget):
         )
 
         self.output_folder_widget = QWidget()
-        self.output_folder_widget.setLayout(
-            output_folder_layout
-        )
+        self.output_folder_widget.setLayout(output_folder_layout)
 
         # Output filename
         self.output_filename_edit = QLineEdit()
-        self.output_filename_edit.setPlaceholderText(
-            "video_upscaled.mp4"
-        )
+        self.output_filename_edit.setPlaceholderText("video_upscaled.mp4")
 
         # Show the complete location that will be passed to FFmpeg.
         self.output_path_preview = QLabel("—")
@@ -525,12 +457,8 @@ class SettingsPage(QWidget):
             font-size: 11px;
         """)
 
-        self.output_folder_edit.textChanged.connect(
-            self.update_output_path_preview
-        )
-        self.output_filename_edit.textChanged.connect(
-            self.update_output_path_preview
-        )
+        self.output_folder_edit.textChanged.connect(self.update_output_path_preview)
+        self.output_filename_edit.textChanged.connect(self.update_output_path_preview)
 
         # -- Settings Form --
 
@@ -550,9 +478,7 @@ class SettingsPage(QWidget):
             self.update_custom_resolution_visibility
         )
 
-        self.resolution_box.currentIndexChanged.connect(
-            self.update_minimum_target_size
-        )
+        self.resolution_box.currentIndexChanged.connect(self.update_minimum_target_size)
 
         settings_form.addRow(
             "Frame rate:",
@@ -618,9 +544,7 @@ class SettingsPage(QWidget):
         # manage it. QScrollArea accepts a widget rather than a layout.
         settings_content = QWidget()
 
-        settings_content_layout = QVBoxLayout(
-            settings_content
-        )
+        settings_content_layout = QVBoxLayout(settings_content)
         settings_content_layout.setContentsMargins(
             0,
             0,
@@ -628,9 +552,7 @@ class SettingsPage(QWidget):
             0,
         )
 
-        settings_content_layout.addLayout(
-            settings_form
-        )
+        settings_content_layout.addLayout(settings_form)
         settings_content_layout.addStretch()
 
         self.settings_scroll = QScrollArea()
@@ -644,9 +566,7 @@ class SettingsPage(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
 
-        self.settings_scroll.setWidget(
-            settings_content
-        )
+        self.settings_scroll.setWidget(settings_content)
 
         # Remove the default border and background so the scroll area blends
         # into the existing settings page.
@@ -693,9 +613,7 @@ class SettingsPage(QWidget):
             }
         """)
 
-        self.settings_scroll.viewport().setAutoFillBackground(
-            False
-        )
+        self.settings_scroll.viewport().setAutoFillBackground(False)
 
         # -- Page Actions --
 
@@ -723,9 +641,7 @@ class SettingsPage(QWidget):
 
         self.render_button.clicked.connect(self.request_render)
 
-        self.queue_button = QPushButton(
-            "Add to queue"
-        )
+        self.queue_button = QPushButton("Add to queue")
 
         self.queue_button.setStyleSheet("""
             QPushButton {
@@ -735,9 +651,7 @@ class SettingsPage(QWidget):
             }
         """)
 
-        self.queue_button.clicked.connect(
-            self.request_queue
-        )
+        self.queue_button.clicked.connect(self.request_queue)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -767,13 +681,9 @@ class SettingsPage(QWidget):
         layout.setContentsMargins(30, 20, 30, 30)
         layout.setSpacing(20)
 
-        layout.addLayout(
-            header_layout
-        )
+        layout.addLayout(header_layout)
 
-        layout.addWidget(
-            self.video_name
-        )
+        layout.addWidget(self.video_name)
 
         # The form expands into the available space and becomes scrollable
         # when the window is not tall enough.
@@ -804,16 +714,11 @@ class SettingsPage(QWidget):
 
         new_input_path = Path(file_path)
 
-        video_changed = (
-            new_input_path
-            != self.input_path
-        )
+        video_changed = new_input_path != self.input_path
 
         self.input_path = new_input_path
 
-        self.video_name.setText(
-            new_input_path.name
-        )
+        self.video_name.setText(new_input_path.name)
 
         self.video_duration = duration
         self.source_fps = source_fps
@@ -821,38 +726,20 @@ class SettingsPage(QWidget):
         self.source_height = source_height
 
         # Display the actual dimensions in the Same as source option.
-        source_index = (
-            self.resolution_box.findData(
-                "source"
-            )
-        )
+        source_index = self.resolution_box.findData("source")
 
-        if (
-            source_index >= 0
-            and source_width is not None
-            and source_height is not None
-        ):
+        if source_index >= 0 and source_width is not None and source_height is not None:
             self.resolution_box.setItemText(
                 source_index,
-                (
-                    "Same as source  "
-                    f"({source_width} × {source_height})"
-                ),
+                (f"Same as source  ({source_width} × {source_height})"),
             )
 
         # Preserve the user's choices when returning to the settings page
         # for the same video, but create defaults for a new video.
-        if (
-            video_changed
-            or not self.output_folder_edit.text()
-        ):
-            self.output_folder_edit.setText(
-                str(new_input_path.parent)
-            )
+        if video_changed or not self.output_folder_edit.text():
+            self.output_folder_edit.setText(str(new_input_path.parent))
 
-            self.output_filename_edit.setText(
-                f"{new_input_path.stem}_upscaled.mp4"
-            )
+            self.output_filename_edit.setText(f"{new_input_path.stem}_upscaled.mp4")
 
         self.update_output_path_preview()
         self.update_minimum_target_size()
@@ -860,87 +747,57 @@ class SettingsPage(QWidget):
     def browse_output_folder(self):
         """Ask the user where the rendered video should be saved."""
 
-        starting_folder = (
-            self.output_folder_edit.text()
-        )
+        starting_folder = self.output_folder_edit.text()
 
-        selected_folder = (
-            QFileDialog.getExistingDirectory(
-                self,
-                "Select output folder",
-                starting_folder,
-            )
+        selected_folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select output folder",
+            starting_folder,
         )
 
         if selected_folder:
-            self.output_folder_edit.setText(
-                selected_folder
-            )
+            self.output_folder_edit.setText(selected_folder)
 
     def update_output_path_preview(self):
         """Display the output path without validating it yet."""
 
-        folder_text = (
-            self.output_folder_edit.text().strip()
-        )
-        filename = (
-            self.output_filename_edit.text().strip()
-        )
+        folder_text = self.output_folder_edit.text().strip()
+        filename = self.output_filename_edit.text().strip()
 
         if not folder_text or not filename:
             self.output_path_preview.setText("—")
             return
 
-        output_path = (
-            Path(folder_text) / filename
-        )
+        output_path = Path(folder_text) / filename
 
-        self.output_path_preview.setText(
-            str(output_path)
-        )
+        self.output_path_preview.setText(str(output_path))
 
     def get_output_path(self):
         """Return a validated MP4 output path."""
 
         if self.input_path is None:
-            raise ValueError(
-                "No input video has been selected."
-            )
+            raise ValueError("No input video has been selected.")
 
-        folder_text = (
-            self.output_folder_edit.text().strip()
-        )
+        folder_text = self.output_folder_edit.text().strip()
 
         if not folder_text:
-            raise ValueError(
-                "Select an output folder."
-            )
+            raise ValueError("Select an output folder.")
 
         output_folder = Path(folder_text)
 
         if not output_folder.is_dir():
-            raise ValueError(
-                "The selected output folder does not exist."
-            )
+            raise ValueError("The selected output folder does not exist.")
 
-        filename = (
-            self.output_filename_edit.text().strip()
-        )
+        filename = self.output_filename_edit.text().strip()
 
         if not filename:
-            raise ValueError(
-                "Enter an output filename."
-            )
+            raise ValueError("Enter an output filename.")
 
         invalid_characters = '<>:"/\\|?*'
 
-        if any(
-            character in filename
-            for character in invalid_characters
-        ):
+        if any(character in filename for character in invalid_characters):
             raise ValueError(
-                "The output filename contains a character "
-                "that Windows does not allow."
+                "The output filename contains a character that Windows does not allow."
             )
 
         filename_path = Path(filename)
@@ -949,24 +806,15 @@ class SettingsPage(QWidget):
             filename = f"{filename}.mp4"
 
             # Keep the visible filename consistent with the actual one.
-            self.output_filename_edit.setText(
-                filename
-            )
+            self.output_filename_edit.setText(filename)
 
         elif filename_path.suffix.lower() != ".mp4":
-            raise ValueError(
-                "The output filename must use the .mp4 extension."
-            )
+            raise ValueError("The output filename must use the .mp4 extension.")
 
         output_path = output_folder / filename
 
-        if (
-            output_path.resolve()
-            == self.input_path.resolve()
-        ):
-            raise ValueError(
-                "The output file cannot overwrite the input video."
-            )
+        if output_path.resolve() == self.input_path.resolve():
+            raise ValueError("The output file cannot overwrite the input video.")
 
         if output_path.exists():
             raise ValueError(
@@ -981,24 +829,13 @@ class SettingsPage(QWidget):
     def update_rate_control_visibility(self):
         """Show controls for the selected rate-control mode."""
 
-        target_size_selected = (
-            self.rate_control_box.currentData()
-            == "target_size"
-        )
+        target_size_selected = self.rate_control_box.currentData() == "target_size"
 
-        self.quality_label.setVisible(
-            not target_size_selected
-        )
-        self.quality_widget.setVisible(
-            not target_size_selected
-        )
+        self.quality_label.setVisible(not target_size_selected)
+        self.quality_widget.setVisible(not target_size_selected)
 
-        self.target_size_label.setVisible(
-            target_size_selected
-        )
-        self.target_size_widget.setVisible(
-            target_size_selected
-        )
+        self.target_size_label.setVisible(target_size_selected)
+        self.target_size_widget.setVisible(target_size_selected)
 
     def update_custom_resolution_visibility(self):
         """Show custom dimensions only when Custom is selected."""
@@ -1021,10 +858,7 @@ class SettingsPage(QWidget):
     def update_quality_display(self, value):
         """Display the currently selected CRF value."""
 
-        self.quality_value.setText(
-            str(value)
-        )
-
+        self.quality_value.setText(str(value))
 
     def update_minimum_target_size(
         self,
@@ -1032,58 +866,40 @@ class SettingsPage(QWidget):
     ):
         """Update the estimated minimum for the current settings."""
 
-        if (
-            self.video_duration is None
-            or self.source_fps is None
-        ):
-            self.minimum_size_label.setText(
-                "Estimated minimum: —"
-            )
+        if self.video_duration is None or self.source_fps is None:
+            self.minimum_size_label.setText("Estimated minimum: —")
             return
 
         try:
             width, height = self.get_resolution()
 
         except ValueError:
-            self.minimum_size_label.setText(
-                "Estimated minimum: —"
-            )
+            self.minimum_size_label.setText("Estimated minimum: —")
             return
 
         selected_fps = self.get_fps()
 
-        effective_fps = (
-            selected_fps
-            if selected_fps is not None
-            else self.source_fps
-        )
+        effective_fps = selected_fps if selected_fps is not None else self.source_fps
 
         encoder = self.encoder_box.currentData()
 
-        minimum_size = (
-            calculate_minimum_target_size_mb(
-                duration=self.video_duration,
-                width=width,
-                height=height,
-                fps=effective_fps,
-                encoder=encoder,
-            )
+        minimum_size = calculate_minimum_target_size_mb(
+            duration=self.video_duration,
+            width=width,
+            height=height,
+            fps=effective_fps,
+            encoder=encoder,
         )
 
         if minimum_size is None:
-            self.minimum_size_label.setText(
-                "Estimated minimum: not available"
-            )
+            self.minimum_size_label.setText("Estimated minimum: not available")
             return
 
         if encoder in {
             "libx264",
             "libx265",
         }:
-            label_text = (
-                f"Recommended minimum: "
-                f"{minimum_size:.1f} MB"
-            )
+            label_text = f"Recommended minimum: {minimum_size:.1f} MB"
 
         elif encoder in {
             "h264_amf",
@@ -1091,27 +907,18 @@ class SettingsPage(QWidget):
             "h264_qsv",
             "hevc_qsv",
         }:
-            label_text = (
-                f"Estimated minimum: "
-                f"{minimum_size:.1f} MB*"
-            )
+            label_text = f"Estimated minimum: {minimum_size:.1f} MB*"
 
         else:
-            label_text = (
-                f"Estimated minimum: "
-                f"{minimum_size:.1f} MB"
-            )
+            label_text = f"Estimated minimum: {minimum_size:.1f} MB"
 
-        self.minimum_size_label.setText(
-            label_text
-        )
+        self.minimum_size_label.setText(label_text)
 
         self.minimum_size_label.setToolTip(
             "This is an estimate based on the codec, resolution and "
             "frame rate. Actual requirements depend on the video content. "
             "AMD and Intel estimates are provisional."
         )
-
 
     def get_fps(self):
         """Return None to preserve FPS, or the selected numeric value."""
@@ -1129,18 +936,11 @@ class SettingsPage(QWidget):
     def get_resolution(self):
         """Return validated output dimensions."""
 
-        selected_resolution = (
-            self.resolution_box.currentData()
-        )
+        selected_resolution = self.resolution_box.currentData()
 
         if selected_resolution == "source":
-            if (
-                self.source_width is None
-                or self.source_height is None
-            ):
-                raise ValueError(
-                    "The source resolution is not available."
-                )
+            if self.source_width is None or self.source_height is None:
+                raise ValueError("The source resolution is not available.")
 
             return (
                 self.source_width,
@@ -1154,13 +954,8 @@ class SettingsPage(QWidget):
         width = self.custom_width.value()
         height = self.custom_height.value()
 
-        if (
-            width % 2 != 0
-            or height % 2 != 0
-        ):
-            raise ValueError(
-                "Width and height must both be even numbers."
-            )
+        if width % 2 != 0 or height % 2 != 0:
+            raise ValueError("Width and height must both be even numbers.")
 
         return width, height
 
@@ -1169,21 +964,15 @@ class SettingsPage(QWidget):
 
         width, height = self.get_resolution()
 
-        rate_control = (
-            self.rate_control_box.currentData()
-        )
+        rate_control = self.rate_control_box.currentData()
 
         target_size_mb = None
 
         if rate_control == "target_size":
-            target_size_mb = (
-                self.target_size_box.value()
-            )
+            target_size_mb = self.target_size_box.value()
 
             if target_size_mb <= 0:
-                raise ValueError(
-                    "Target file size must be greater than zero."
-                )
+                raise ValueError("Target file size must be greater than zero.")
 
         return {
             "resolution": (width, height),
@@ -1237,17 +1026,11 @@ class SettingsPage(QWidget):
         """Update controls when an FFmpeg process starts or stops."""
 
         self.is_rendering = rendering
-        self.back_button.setEnabled(
-            not rendering
-        )
-        self.queue_button.setEnabled(
-            not rendering
-        )
+        self.back_button.setEnabled(not rendering)
+        self.queue_button.setEnabled(not rendering)
 
         if rendering:
-            self.render_button.setText(
-                "Cancel"
-            )
+            self.render_button.setText("Cancel")
             self.render_button.setEnabled(True)
 
             self.progress_bar.setValue(0)
@@ -1255,9 +1038,7 @@ class SettingsPage(QWidget):
             self.progress_bar.show()
 
         else:
-            self.render_button.setText(
-                "Render"
-            )
+            self.render_button.setText("Render")
             self.render_button.setEnabled(True)
 
     def set_cancelling(self):
@@ -1280,18 +1061,10 @@ class SettingsPage(QWidget):
         self.hardware_encoders = encoders
 
         if not encoders:
-            self.gpu_encoding_checkbox.setChecked(
-                False
-            )
-            self.gpu_encoding_checkbox.setEnabled(
-                False
-            )
-            self.gpu_encoding_checkbox.setToolTip(
-                "No usable GPU encoder was detected."
-            )
-            self.gpu_status.setText(
-                "No supported GPU encoder detected"
-            )
+            self.gpu_encoding_checkbox.setChecked(False)
+            self.gpu_encoding_checkbox.setEnabled(False)
+            self.gpu_encoding_checkbox.setToolTip("No usable GPU encoder was detected.")
+            self.gpu_status.setText("No supported GPU encoder detected")
 
         else:
             vendor_names = {
@@ -1301,31 +1074,23 @@ class SettingsPage(QWidget):
             }
 
             detected_vendors = [
-                vendor_names.get(vendor, vendor.title())
-                for vendor in encoders
+                vendor_names.get(vendor, vendor.title()) for vendor in encoders
             ]
 
             vendor_text = ", ".join(detected_vendors)
 
-            self.gpu_encoding_checkbox.setEnabled(
-                True
-            )
+            self.gpu_encoding_checkbox.setEnabled(True)
             self.gpu_encoding_checkbox.setToolTip(
                 f"Use the detected {vendor_text} GPU encoder."
             )
-            self.gpu_status.setText(
-                f"{vendor_text} hardware encoding available"
-            )
+            self.gpu_status.setText(f"{vendor_text} hardware encoding available")
 
         self.update_encoder_options()
-
 
     def update_encoder_options(self):
         """Show CPU or detected hardware encoders."""
 
-        previous_encoder = (
-            self.encoder_box.currentData()
-        )
+        previous_encoder = self.encoder_box.currentData()
 
         # Try to preserve whether the user selected H.264 or H.265.
         if previous_encoder in {
@@ -1341,9 +1106,8 @@ class SettingsPage(QWidget):
         self.encoder_box.blockSignals(True)
         self.encoder_box.clear()
 
-        use_gpu = (
-            self.gpu_encoding_checkbox.isChecked()
-            and bool(self.hardware_encoders)
+        use_gpu = self.gpu_encoding_checkbox.isChecked() and bool(
+            self.hardware_encoders
         )
 
         if use_gpu:
@@ -1353,9 +1117,7 @@ class SettingsPage(QWidget):
                 "intel": "Intel Quick Sync",
             }
 
-            for vendor, codecs in (
-                self.hardware_encoders.items()
-            ):
+            for vendor, codecs in self.hardware_encoders.items():
                 vendor_label = vendor_names.get(
                     vendor,
                     vendor.title(),
@@ -1380,14 +1142,13 @@ class SettingsPage(QWidget):
             )
 
         # Restore the previously selected codec where possible.
-        for index in range(
-            self.encoder_box.count()
-        ):
+        for index in range(self.encoder_box.count()):
             encoder = self.encoder_box.itemData(index)
 
             encoder_codec = (
                 "h265"
-                if encoder in {
+                if encoder
+                in {
                     "libx265",
                     "hevc_nvenc",
                     "hevc_amf",

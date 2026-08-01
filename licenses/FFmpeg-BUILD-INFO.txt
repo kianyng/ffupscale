@@ -5,13 +5,13 @@ Recorded from:
     vendor\ffmpeg\bin\ffmpeg.exe -version
 
 Version:
-    ffmpeg version 7.1.1-full_build-www.gyan.dev
+    ffmpeg version 8.1.2-full_build-www.gyan.dev
 
 Copyright:
-    Copyright (c) 2000-2025 the FFmpeg developers
+    Copyright (c) 2000-2026 the FFmpeg developers
 
 Toolchain:
-    gcc 14.2.0 (Rev1, Built by MSYS2 project)
+    gcc 16.1.0 (Rev2, Built by MSYS2 project)
 
 Provider:
     Gyan Doshi Windows builds
@@ -19,6 +19,11 @@ Provider:
 
 Build type:
     64-bit static "full" build
+
+Provider archive:
+    ffmpeg-8.1.2-full_build.7z
+    SHA-256:
+    0fff188997a499b5382e0f66e845d4556c48c54f0113ebed4853d556dbdd7059
 
 Reported license-relevant configuration:
     --enable-gpl
@@ -28,18 +33,17 @@ Reported license-relevant configuration:
     --enable-libx265
 
 Library versions:
-    libavutil      59. 39.100
-    libavcodec     61. 19.101
-    libavformat    61.  7.100
-    libavdevice    61.  3.100
-    libavfilter    10.  4.100
-    libswscale      8.  3.100
-    libswresample   5.  3.100
-    libpostproc    58.  3.100
+    libavutil      60. 26.102
+    libavcodec     62. 28.102
+    libavformat    62. 12.102
+    libavdevice    62.  3.102
+    libavfilter    11. 14.102
+    libswscale      9.  5.102
+    libswresample   6.  3.102
 
 Upstream source for this FFmpeg release:
-    https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz
-    https://github.com/FFmpeg/FFmpeg/tree/n7.1.1
+    https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
+    https://github.com/FFmpeg/FFmpeg/tree/n8.1.2
 
 License:
     GNU General Public License, version 3 (GPLv3)

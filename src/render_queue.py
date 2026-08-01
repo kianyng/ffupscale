@@ -1,7 +1,7 @@
 from render_job import RenderJob, RenderStatus
 
-
 # -- Render Queue --
+
 
 class RenderQueue:
     """Manage an ordered, sequential collection of render jobs."""
@@ -27,14 +27,10 @@ class RenderQueue:
         """Add a waiting job to the end of the queue."""
 
         if not isinstance(job, RenderJob):
-            raise TypeError(
-                "Only RenderJob objects can be queued."
-            )
+            raise TypeError("Only RenderJob objects can be queued.")
 
         if self.get(job.job_id) is not None:
-            raise ValueError(
-                "This render job is already queued."
-            )
+            raise ValueError("This render job is already queued.")
 
         job.mark_waiting()
         self.jobs.append(job)
@@ -57,9 +53,7 @@ class RenderQueue:
             return False
 
         if job.status == RenderStatus.RENDERING:
-            raise ValueError(
-                "The active render cannot be removed."
-            )
+            raise ValueError("The active render cannot be removed.")
 
         self.jobs.remove(job)
         return True
@@ -83,14 +77,10 @@ class RenderQueue:
         job = self.get(job_id)
 
         if job is None:
-            raise ValueError(
-                "The selected render job does not exist."
-            )
+            raise ValueError("The selected render job does not exist.")
 
         if job.status != RenderStatus.WAITING:
-            raise ValueError(
-                "Only waiting jobs can be moved."
-            )
+            raise ValueError("Only waiting jobs can be moved.")
 
         self.jobs.remove(job)
 
@@ -100,9 +90,7 @@ class RenderQueue:
             self.jobs.insert(0, job)
             return
 
-        active_index = self.jobs.index(
-            active_job
-        )
+        active_index = self.jobs.index(active_job)
 
         self.jobs.insert(
             active_index + 1,
@@ -115,19 +103,13 @@ class RenderQueue:
         """Mark one waiting job as the active render."""
 
         if job not in self.jobs:
-            raise ValueError(
-                "The render job is not in this queue."
-            )
+            raise ValueError("The render job is not in this queue.")
 
         if self.active_job is not None:
-            raise ValueError(
-                "Another video is already rendering."
-            )
+            raise ValueError("Another video is already rendering.")
 
         if job.status != RenderStatus.WAITING:
-            raise ValueError(
-                "Only waiting jobs can be started."
-            )
+            raise ValueError("Only waiting jobs can be started.")
 
         job.mark_rendering()
 
@@ -136,20 +118,10 @@ class RenderQueue:
     def clear_completed(self):
         """Remove completed jobs while keeping all other jobs."""
 
-        self.jobs = [
-            job
-            for job in self.jobs
-            if job.status != RenderStatus.COMPLETED
-        ]
+        self.jobs = [job for job in self.jobs if job.status != RenderStatus.COMPLETED]
 
     def waiting_count(self):
-        return sum(
-            job.status == RenderStatus.WAITING
-            for job in self.jobs
-        )
+        return sum(job.status == RenderStatus.WAITING for job in self.jobs)
 
     def completed_count(self):
-        return sum(
-            job.status == RenderStatus.COMPLETED
-            for job in self.jobs
-        )
+        return sum(job.status == RenderStatus.COMPLETED for job in self.jobs)

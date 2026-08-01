@@ -8,7 +8,7 @@ notices.
 
 - 64-bit Windows 10 or 11
 - Python 3.9 or newer
-- `ffmpeg.exe` and `ffprobe.exe` from the documented FFmpeg 7.1.1 Gyan full
+- `ffmpeg.exe` and `ffprobe.exe` from the documented FFmpeg 8.1.2 Gyan full
   build, placed in `vendor\ffmpeg\bin\`
 
 The FFmpeg executables are intentionally excluded from Git because of their
@@ -56,9 +56,12 @@ Test the package from `release-folder\ffupscale`. Confirm that:
 1. `ffupscale.exe` starts.
 2. Importing a video displays its properties and thumbnail.
 3. A short render completes using the bundled tools.
-4. `THIRD_PARTY_NOTICES.md`, `licenses\GPL-3.0.txt`, and
+4. CPU encoding and every available hardware encoder complete a short render.
+5. Target-size mode rejects an impractical size and completes a practical one.
+6. Queueing, cancelling, retrying, and opening the output folder work.
+7. `THIRD_PARTY_NOTICES.md`, `licenses\GPL-3.0.txt`, and
    `licenses\FFmpeg-BUILD-INFO.txt` are present.
-5. The packaged FFmpeg version matches the build-information file.
+8. The packaged FFmpeg and FFprobe versions match the build-information file.
 
 ## Create the ZIP
 
