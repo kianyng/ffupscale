@@ -35,6 +35,7 @@ class SettingsPage(QWidget):
     render_requested = pyqtSignal(dict)
     cancel_requested = pyqtSignal()
     queue_requested = pyqtSignal(dict)
+    view_queue_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -54,6 +55,53 @@ class SettingsPage(QWidget):
             font-size: 32px;
             font-weight: bold;
         """)
+
+        self.view_queue_button = QPushButton(
+            "View queue"
+        )
+
+        self.view_queue_button.setFixedWidth(110)
+
+        self.view_queue_button.setStyleSheet("""
+            QPushButton {
+                font-size: 13px;
+                font-weight: bold;
+                padding: 6px;
+            }
+        """)
+
+        self.view_queue_button.clicked.connect(
+            self.view_queue_requested.emit
+        )
+
+        # A matching spacer keeps the title centred in the page,
+        # rather than centred only in the remaining space.
+        header_spacer = QWidget()
+        header_spacer.setFixedWidth(
+            self.view_queue_button.width()
+        )
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+        header_layout.setSpacing(10)
+
+        header_layout.addWidget(
+            header_spacer
+        )
+
+        header_layout.addWidget(
+            title,
+            stretch=1,
+        )
+
+        header_layout.addWidget(
+            self.view_queue_button
+        )
 
         self.video_name = QLabel("No video selected")
         self.video_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -711,8 +759,13 @@ class SettingsPage(QWidget):
         layout.setContentsMargins(30, 20, 30, 30)
         layout.setSpacing(20)
 
-        layout.addWidget(title)
-        layout.addWidget(self.video_name)
+        layout.addLayout(
+            header_layout
+        )
+
+        layout.addWidget(
+            self.video_name
+        )
 
         # The form expands into the available space and becomes scrollable
         # when the window is not tall enough.
