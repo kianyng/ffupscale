@@ -24,6 +24,7 @@ release-folder/
 *.zip
 *.7z
 *.rar
+installer-output/
 
 # Local design source files and exports
 assets/*.psd
