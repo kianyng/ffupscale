@@ -58,6 +58,21 @@ class QueueJobRow(QFrame):
             font-size: 11px;
         """)
 
+        self.trim_label = QLabel()
+
+        self.trim_label.setStyleSheet("""
+            color: #999999;
+            font-size: 11px;
+        """)
+
+        self.output_label = QLabel()
+        self.output_label.setWordWrap(True)
+
+        self.output_label.setStyleSheet("""
+            color: #777777;
+            font-size: 11px;
+        """)
+
         self.status_label = QLabel()
 
         self.progress_bar = QProgressBar()
@@ -78,7 +93,9 @@ class QueueJobRow(QFrame):
         text_layout = QVBoxLayout()
         text_layout.setSpacing(4)
         text_layout.addWidget(self.filename_label)
+        text_layout.addWidget(self.trim_label)
         text_layout.addWidget(self.details_label)
+        text_layout.addWidget(self.output_label)
         text_layout.addWidget(self.status_label)
         text_layout.addWidget(self.progress_bar)
 
@@ -114,6 +131,14 @@ class QueueJobRow(QFrame):
         """Update text, progress and buttons for the job state."""
 
         self.filename_label.setText(job.filename)
+
+        self.trim_label.setText(
+            job.trim_range_text
+        )
+
+        self.output_label.setText(
+            f"Output: {job.output_path.name}"
+        )
 
         fps_text = "Original FPS" if job.fps is None else f"{job.fps:g} FPS"
 

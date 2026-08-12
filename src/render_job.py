@@ -128,6 +128,72 @@ class RenderJob:
 
     # -- Display Helpers --
 
+    @staticmethod
+    def format_timecode(seconds):
+        """Format seconds as HH:MM:SS.mmm."""
+
+        total_milliseconds = max(
+            0,
+            round(float(seconds) * 1000),
+        )
+
+        total_seconds, milliseconds = divmod(
+            total_milliseconds,
+            1000,
+        )
+
+        hours, remainder = divmod(
+            total_seconds,
+            3600,
+        )
+
+        minutes, seconds = divmod(
+            remainder,
+            60,
+        )
+
+        return (
+            f"{hours:02d}:"
+            f"{minutes:02d}:"
+            f"{seconds:02d}."
+            f"{milliseconds:03d}"
+        )
+
+    @property
+    def trim_range_text(self):
+        """Describe the range stored by this job."""
+
+        duration_text = self.format_timecode(
+            self.duration
+        )
+
+        if (
+            self.trim_start == 0
+            and self.trim_end is None
+        ):
+            return (
+                f"Full video · {duration_text}"
+            )
+
+        end_time = (
+            self.trim_end
+            if self.trim_end is not None
+            else self.source_duration
+        )
+
+        start_text = self.format_timecode(
+            self.trim_start
+        )
+
+        end_text = self.format_timecode(
+            end_time
+        )
+
+        return (
+            f"{start_text}–{end_text}"
+            f" · {duration_text}"
+        )
+
     @property
     def duration(self):
         """Return the duration that FFmpeg will render."""

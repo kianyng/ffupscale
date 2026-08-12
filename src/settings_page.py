@@ -949,12 +949,6 @@ class SettingsPage(QWidget):
         if output_path.resolve() == self.input_path.resolve():
             raise ValueError("The output file cannot overwrite the input video.")
 
-        if output_path.exists():
-            raise ValueError(
-                "A file already exists at the selected output path. "
-                "Choose another filename."
-            )
-
         return output_path
 
 

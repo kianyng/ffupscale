@@ -1009,11 +1009,52 @@ class MainWindow(QMainWindow):
         self.render_queue.clear_completed()
         self.refresh_queue_page()
 
+    def create_available_output_path(
+        self,
+        requested_path,
+    ):
+        """
+        Return an unused path on disk and in the render queue.
+
+        Duplicate names use the Windows-style format:
+        video.mp4, video (1).mp4, video (2).mp4.
+        """
+
+        requested_path = Path(
+            requested_path
+        )
+
+        reserved_paths = {
+            str(job.output_path.resolve()).casefold()
+            for job in self.render_queue.jobs
+        }
+
+        candidate = requested_path
+        number = 1
+
+        while (
+            candidate.exists()
+            or str(
+                candidate.resolve()
+            ).casefold() in reserved_paths
+        ):
+            candidate = requested_path.with_name(
+                f"{requested_path.stem}"
+                f" ({number})"
+                f"{requested_path.suffix}"
+            )
+
+            number += 1
+
+        return candidate
+
     def create_render_job(self, settings):
-        """Create and validate a job from the current selection."""
+        """Create a job with a unique output path."""
 
         if self.selected_video is None:
-            raise ValueError("Select a video first.")
+            raise ValueError(
+                "Select a video first."
+            )
 
         job = RenderJob.from_settings(
             input_path=self.selected_video,
@@ -1022,11 +1063,11 @@ class MainWindow(QMainWindow):
             settings=settings,
         )
 
-        new_output = job.output_path.resolve()
-
-        for existing_job in self.render_queue.jobs:
-            if existing_job.output_path.resolve() == new_output:
-                raise ValueError("Another queued video already uses this output path.")
+        job.output_path = (
+            self.create_available_output_path(
+                job.output_path
+            )
+        )
 
         return job
 
