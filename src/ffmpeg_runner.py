@@ -398,6 +398,8 @@ def build_upscale_command(
     target_size_mb=None,
     duration=None,
     source_fps=None,
+    trim_start=0.0,
+    trim_end=None,
 ):
     """
     Validate the settings and build an FFmpeg command.
@@ -436,13 +438,55 @@ def build_upscale_command(
     }:
         raise ValueError(f"Unknown rate-control mode: {rate_control}")
 
+    # -- Trim Validation --
+
+    if trim_start < 0:
+        raise ValueError(
+            "The trim start cannot be negative."
+        )
+
+    if duration is not None:
+        if trim_start >= duration:
+            raise ValueError(
+                "The trim start must be inside the video."
+            )
+
+        if (
+            trim_end is not None
+            and trim_end > duration
+        ):
+            raise ValueError(
+                "The trim end cannot exceed the video duration."
+            )
+
+    if (
+        trim_end is not None
+        and trim_end <= trim_start
+    ):
+        raise ValueError(
+            "The trim end must be after the trim start."
+        )
+
+    selected_duration = None
+
+    if duration is not None:
+        end_time = (
+            trim_end
+            if trim_end is not None
+            else duration
+        )
+
+        selected_duration = (
+            end_time - trim_start
+        )
+
     video_bitrate = None
 
     if rate_control == "target_size":
         if target_size_mb is None:
             raise ValueError("Enter a target file size.")
 
-        if duration is None:
+        if selected_duration is None:
             raise ValueError("Video duration is required for target-size mode.")
 
         effective_fps = fps if fps is not None else source_fps
@@ -454,7 +498,7 @@ def build_upscale_command(
 
         video_bitrate = calculate_target_video_bitrate(
             target_size_mb=target_size_mb,
-            duration=duration,
+            duration=selected_duration,
             width=width,
             height=height,
             fps=effective_fps,
@@ -484,6 +528,32 @@ def build_upscale_command(
             "copy",
         ]
 
+    # Seeking before the input lets FFmpeg reach the selected
+    # starting position efficiently. Because the video is then
+    # re-encoded, FFmpeg can still produce an accurate start point.
+
+    input_arguments = []
+
+    if trim_start > 0:
+        input_arguments.extend([
+            "-ss",
+            str(trim_start),
+        ])
+
+    input_arguments.extend([
+        "-i",
+        str(input_path),
+    ])
+
+    if selected_duration is not None and (
+        trim_start > 0
+        or trim_end is not None
+    ):
+        input_arguments.extend([
+            "-t",
+            str(selected_duration),
+        ])
+
     arguments = [
         # Send machine-readable progress to stdout for the Qt progress bar.
         "-progress",
@@ -492,9 +562,8 @@ def build_upscale_command(
         "-hide_banner",
         # Refuse to overwrite an existing output.
         "-n",
-        # Input
-        "-i",
-        str(input_path),
+        # Input and optional trim range
+        *input_arguments,
         # First video stream and optional audio stream
         "-map",
         "0:v:0",

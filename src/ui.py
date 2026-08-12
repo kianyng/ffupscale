@@ -1050,8 +1050,10 @@ class MainWindow(QMainWindow):
                 preset=job.preset,
                 rate_control=job.rate_control,
                 target_size_mb=job.target_size_mb,
-                duration=job.duration,
+                duration=job.source_duration,
                 source_fps=job.source_fps,
+                trim_start=job.trim_start,
+                trim_end=job.trim_end,
             )
 
             self.current_job = job

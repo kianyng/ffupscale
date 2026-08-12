@@ -35,8 +35,10 @@ class RenderJob:
     fps: float | None
     encoder: str
     preset: str
-    duration: float
+    source_duration: float
     source_fps: float
+    trim_start: float = 0.0
+    trim_end: float | None = None
 
     job_id: str = field(default_factory=lambda: uuid4().hex)
     status: RenderStatus = RenderStatus.WAITING
@@ -44,8 +46,47 @@ class RenderJob:
     error_message: str | None = None
 
     def __post_init__(self):
+        """Normalize paths and validate the selected trim range."""
+
         self.input_path = Path(self.input_path)
         self.output_path = Path(self.output_path)
+
+        self.source_duration = float(
+            self.source_duration
+        )
+
+        self.trim_start = float(
+            self.trim_start
+        )
+
+        if self.trim_end is not None:
+            self.trim_end = float(
+                self.trim_end
+            )
+
+        if self.source_duration <= 0:
+            raise ValueError(
+                "The source duration must be greater than zero."
+            )
+
+        if (
+            self.trim_start < 0
+            or self.trim_start >= self.source_duration
+        ):
+            raise ValueError(
+                "The trim start must be inside the video."
+            )
+
+        if self.trim_end is not None:
+            if self.trim_end <= self.trim_start:
+                raise ValueError(
+                    "The trim end must be after the trim start."
+                )
+
+            if self.trim_end > self.source_duration:
+                raise ValueError(
+                    "The trim end cannot exceed the video duration."
+                )
 
     @classmethod
     def from_settings(
@@ -59,6 +100,15 @@ class RenderJob:
 
         width, height = settings["resolution"]
 
+        trim_start = settings.get(
+            "trim_start",
+            0.0,
+        )
+
+        trim_end = settings.get(
+            "trim_end",
+        )
+
         return cls(
             input_path=Path(input_path),
             output_path=Path(settings["output_path"]),
@@ -70,11 +120,25 @@ class RenderJob:
             fps=settings["fps"],
             encoder=settings["encoder"],
             preset=settings["preset"],
-            duration=duration,
+            source_duration=duration,
             source_fps=source_fps,
+            trim_start=trim_start,
+            trim_end=trim_end,
         )
 
     # -- Display Helpers --
+
+    @property
+    def duration(self):
+        """Return the duration that FFmpeg will render."""
+
+        end_time = (
+            self.trim_end
+            if self.trim_end is not None
+            else self.source_duration
+        )
+
+        return end_time - self.trim_start
 
     @property
     def filename(self):
