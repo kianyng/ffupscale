@@ -98,6 +98,65 @@ class SettingsPage(QWidget):
         self.video_name = QLabel("No video selected")
         self.video_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        # -- Trim Range --
+
+        self.trim_checkbox = QCheckBox(
+            "Render only part of the video"
+        )
+
+        self.trim_start_box = QDoubleSpinBox()
+        self.trim_start_box.setRange(
+            0.0,
+            86_400.0,
+        )
+        self.trim_start_box.setDecimals(3)
+        self.trim_start_box.setSingleStep(0.1)
+        self.trim_start_box.setSuffix(" s")
+        self.trim_start_box.setToolTip(
+            "Position where the exported clip begins."
+        )
+
+        self.trim_end_box = QDoubleSpinBox()
+        self.trim_end_box.setRange(
+            0.0,
+            86_400.0,
+        )
+        self.trim_end_box.setDecimals(3)
+        self.trim_end_box.setSingleStep(0.1)
+        self.trim_end_box.setSuffix(" s")
+        self.trim_end_box.setToolTip(
+            "Position where the exported clip ends."
+        )
+
+        self.trim_duration_label = QLabel(
+            "Selected duration: —"
+        )
+
+        self.trim_duration_label.setStyleSheet("""
+            color: #999999;
+            font-size: 11px;
+        """)
+
+        self.reset_trim_button = QPushButton(
+            "Reset to full video"
+        )
+
+        self.reset_trim_button.clicked.connect(
+            self.reset_trim_range
+        )
+
+        self.trim_checkbox.toggled.connect(
+            self.update_trim_controls
+        )
+
+        self.trim_start_box.valueChanged.connect(
+            self.update_trim_summary
+        )
+
+        self.trim_end_box.valueChanged.connect(
+            self.update_trim_summary
+        )
+
         # -- Resolution Settings --
 
         self.resolution_box = QComboBox()
@@ -465,6 +524,49 @@ class SettingsPage(QWidget):
         settings_form = QFormLayout()
         settings_form.setVerticalSpacing(20)
         settings_form.addRow(
+            "Trim:",
+            self.trim_checkbox,
+        )
+
+        settings_form.addRow(
+            "Start:",
+            self.trim_start_box,
+        )
+
+        settings_form.addRow(
+            "End:",
+            self.trim_end_box,
+        )
+
+        trim_information_layout = QHBoxLayout()
+        trim_information_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+        trim_information_layout.setSpacing(10)
+
+        trim_information_layout.addWidget(
+            self.trim_duration_label
+        )
+
+        trim_information_layout.addStretch()
+
+        trim_information_layout.addWidget(
+            self.reset_trim_button
+        )
+
+        self.trim_information_widget = QWidget()
+        self.trim_information_widget.setLayout(
+            trim_information_layout
+        )
+
+        settings_form.addRow(
+            "",
+            self.trim_information_widget,
+        )
+        settings_form.addRow(
             "Resolution:",
             self.resolution_box,
         )
@@ -699,6 +801,7 @@ class SettingsPage(QWidget):
         self.update_custom_resolution_visibility()
         self.update_custom_fps_visibility()
         self.update_rate_control_visibility()
+        self.update_trim_controls()
 
     # -- Video and Output Selection --
 
@@ -725,6 +828,35 @@ class SettingsPage(QWidget):
         self.source_width = source_width
         self.source_height = source_height
 
+        # QDoubleSpinBox displays milliseconds, so round down
+        # to avoid placing the end slightly beyond the source.
+        if duration is not None and duration > 0:
+            displayed_duration = (
+                int(float(duration) * 1000)
+                / 1000
+            )
+
+            self.trim_checkbox.setEnabled(True)
+
+            self.trim_start_box.setMaximum(
+                displayed_duration
+            )
+
+            self.trim_end_box.setMaximum(
+                displayed_duration
+            )
+
+            if video_changed:
+                self.trim_checkbox.setChecked(False)
+                self.trim_start_box.setValue(0.0)
+                self.trim_end_box.setValue(
+                    displayed_duration
+                )
+
+        else:
+            self.trim_checkbox.setEnabled(False)
+            self.trim_checkbox.setChecked(False)
+
         # Display the actual dimensions in the Same as source option.
         source_index = self.resolution_box.findData("source")
 
@@ -742,6 +874,7 @@ class SettingsPage(QWidget):
             self.output_filename_edit.setText(f"{new_input_path.stem}_upscaled.mp4")
 
         self.update_output_path_preview()
+        self.update_trim_controls()
         self.update_minimum_target_size()
 
     def browse_output_folder(self):
@@ -824,6 +957,157 @@ class SettingsPage(QWidget):
 
         return output_path
 
+
+    # -- Trim Range --
+
+    @staticmethod
+    def format_timecode(seconds):
+        """Format seconds as HH:MM:SS.mmm."""
+
+        total_milliseconds = round(
+            float(seconds) * 1000
+        )
+
+        total_seconds, milliseconds = divmod(
+            total_milliseconds,
+            1000,
+        )
+
+        hours, remainder = divmod(
+            total_seconds,
+            3600,
+        )
+
+        minutes, seconds = divmod(
+            remainder,
+            60,
+        )
+
+        return (
+            f"{hours:02d}:"
+            f"{minutes:02d}:"
+            f"{seconds:02d}."
+            f"{milliseconds:03d}"
+        )
+
+    def update_trim_controls(
+        self,
+        _checked=None,
+    ):
+        """Enable trim inputs only when trimming is selected."""
+
+        trim_enabled = (
+            self.trim_checkbox.isChecked()
+            and self.video_duration is not None
+        )
+
+        self.trim_start_box.setEnabled(
+            trim_enabled
+        )
+
+        self.trim_end_box.setEnabled(
+            trim_enabled
+        )
+
+        self.reset_trim_button.setEnabled(
+            trim_enabled
+        )
+
+        self.update_trim_summary()
+
+    def update_trim_summary(
+        self,
+        _value=None,
+    ):
+        """Display the duration of the selected range."""
+
+        if self.video_duration is None:
+            self.trim_duration_label.setText(
+                "Selected duration: —"
+            )
+            return
+
+        if self.trim_checkbox.isChecked():
+            selected_duration = (
+                self.trim_end_box.value()
+                - self.trim_start_box.value()
+            )
+
+        else:
+            selected_duration = (
+                self.video_duration
+            )
+
+        if selected_duration <= 0:
+            self.trim_duration_label.setText(
+                "Selected duration: invalid range"
+            )
+
+        else:
+            timecode = self.format_timecode(
+                selected_duration
+            )
+
+            self.trim_duration_label.setText(
+                f"Selected duration: {timecode}"
+            )
+
+        self.update_minimum_target_size()
+
+    def reset_trim_range(self):
+        """Select the complete source video."""
+
+        if self.video_duration is None:
+            return
+
+        displayed_duration = (
+            int(float(self.video_duration) * 1000)
+            / 1000
+        )
+
+        self.trim_start_box.setValue(0.0)
+
+        self.trim_end_box.setValue(
+            displayed_duration
+        )
+
+    def get_trim_range(self):
+        """Return and validate the selected trim range."""
+
+        if self.video_duration is None:
+            raise ValueError(
+                "The source video duration is unavailable."
+            )
+
+        if not self.trim_checkbox.isChecked():
+            return 0.0, None
+
+        trim_start = (
+            self.trim_start_box.value()
+        )
+
+        trim_end = (
+            self.trim_end_box.value()
+        )
+
+        if trim_start < 0:
+            raise ValueError(
+                "The trim start cannot be negative."
+            )
+
+        if trim_end <= trim_start:
+            raise ValueError(
+                "The trim end must be after the trim start."
+            )
+
+        if trim_end > self.video_duration:
+            raise ValueError(
+                "The trim end cannot exceed the video duration."
+            )
+
+        return trim_start, trim_end
+
+
     # -- Setting Values and Visibility --
 
     def update_rate_control_visibility(self):
@@ -872,10 +1156,19 @@ class SettingsPage(QWidget):
 
         try:
             width, height = self.get_resolution()
+            trim_start, trim_end = (
+                self.get_trim_range()
+            )
 
         except ValueError:
             self.minimum_size_label.setText("Estimated minimum: —")
             return
+
+        effective_duration = (
+            trim_end - trim_start
+            if trim_end is not None
+            else self.video_duration
+        )
 
         selected_fps = self.get_fps()
 
@@ -884,7 +1177,7 @@ class SettingsPage(QWidget):
         encoder = self.encoder_box.currentData()
 
         minimum_size = calculate_minimum_target_size_mb(
-            duration=self.video_duration,
+            duration=effective_duration,
             width=width,
             height=height,
             fps=effective_fps,
@@ -964,6 +1257,10 @@ class SettingsPage(QWidget):
 
         width, height = self.get_resolution()
 
+        trim_start, trim_end = (
+            self.get_trim_range()
+        )
+
         rate_control = self.rate_control_box.currentData()
 
         target_size_mb = None
@@ -983,6 +1280,8 @@ class SettingsPage(QWidget):
             "encoder": self.encoder_box.currentData(),
             "preset": self.preset_box.currentData(),
             "output_path": self.get_output_path(),
+            "trim_start": trim_start,
+            "trim_end": trim_end,
         }
 
     # -- Render Requests and Progress --
