@@ -523,9 +523,14 @@ def build_upscale_command(
 
     else:
         # Quality mode can preserve the original compressed audio.
+        # Convert the source audio to AAC for reliable MP4 playback.
+        # WebM files commonly contain Opus audio, which Discord may not
+        # recognise as an inline-playable MP4.
         audio_arguments = [
             "-c:a",
-            "copy",
+            "aac",
+            "-b:a",
+            "192k",
         ]
 
     # Seeking before the input lets FFmpeg reach the selected

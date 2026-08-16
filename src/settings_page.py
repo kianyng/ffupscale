@@ -157,6 +157,18 @@ class SettingsPage(QWidget):
             self.update_trim_summary
         )
 
+        self.trim_start_box.valueChanged.connect(
+            self.update_preset_recommendation
+        )
+
+        self.trim_end_box.valueChanged.connect(
+            self.update_preset_recommendation
+        )
+
+        self.trim_checkbox.toggled.connect(
+            self.update_preset_recommendation
+        )
+
         # -- Resolution Settings --
 
         self.resolution_box = QComboBox()
@@ -275,6 +287,64 @@ class SettingsPage(QWidget):
         self.fps_box.currentIndexChanged.connect(self.update_minimum_target_size)
 
         self.custom_fps.valueChanged.connect(self.update_minimum_target_size)
+
+        # -- Export Presets --
+
+        self.export_preset_box = QComboBox()
+
+        self.export_preset_box.addItem(
+            "Custom settings",
+            None,
+        )
+
+        self.export_preset_box.addItem(
+            "10 MB",
+            10.0,
+        )
+
+        self.export_preset_box.addItem(
+            "25 MB",
+            25.0,
+        )
+
+        self.export_preset_box.addItem(
+            "50 MB",
+            50.0,
+        )
+
+        self.export_preset_box.addItem(
+            "100 MB",
+            100.0,
+        )
+
+        self.auto_preset_checkbox = QCheckBox(
+            "Automatically choose resolution and frame rate"
+        )
+
+        self.auto_preset_checkbox.setChecked(
+            True
+        )
+
+        self.preset_recommendation_label = QLabel(
+            "Select a size preset to receive a recommendation."
+        )
+
+        self.preset_recommendation_label.setWordWrap(
+            True
+        )
+
+        self.preset_recommendation_label.setStyleSheet("""
+            color: #999999;
+            font-size: 11px;
+        """)
+
+        self.export_preset_box.currentIndexChanged.connect(
+            self.apply_export_preset
+        )
+
+        self.auto_preset_checkbox.toggled.connect(
+            self.update_preset_recommendation
+        )
 
         # -- Rate Control Settings --
 
@@ -446,7 +516,13 @@ class SettingsPage(QWidget):
 
         self.encoder_box = QComboBox()
 
-        self.encoder_box.currentIndexChanged.connect(self.update_minimum_target_size)
+        self.encoder_box.currentIndexChanged.connect(
+            self.update_minimum_target_size
+        )
+
+        self.encoder_box.currentIndexChanged.connect(
+            self.update_preset_recommendation
+        )
 
         self.gpu_encoding_checkbox.toggled.connect(self.update_encoder_options)
 
@@ -590,6 +666,21 @@ class SettingsPage(QWidget):
         settings_form.addRow(
             self.custom_fps_label,
             self.custom_fps,
+        )
+
+        settings_form.addRow(
+            "Export preset:",
+            self.export_preset_box,
+        )
+
+        settings_form.addRow(
+            "",
+            self.auto_preset_checkbox,
+        )
+
+        settings_form.addRow(
+            "",
+            self.preset_recommendation_label,
         )
 
         settings_form.addRow(
@@ -876,6 +967,7 @@ class SettingsPage(QWidget):
         self.update_output_path_preview()
         self.update_trim_controls()
         self.update_minimum_target_size()
+        self.update_preset_recommendation()
 
     def browse_output_folder(self):
         """Ask the user where the rendered video should be saved."""
@@ -1132,6 +1224,265 @@ class SettingsPage(QWidget):
         self.custom_fps_label.setVisible(custom_selected)
 
         self.custom_fps.setVisible(custom_selected)
+
+
+    def apply_export_preset(
+        self,
+        _index=None,
+    ):
+        """Apply the size represented by the selected preset."""
+
+        target_size = (
+            self.export_preset_box.currentData()
+        )
+
+        if target_size is None:
+            self.preset_recommendation_label.setText(
+                "Using manually selected export settings."
+            )
+            return
+
+        target_mode_index = (
+            self.rate_control_box.findData(
+                "target_size"
+            )
+        )
+
+        if target_mode_index >= 0:
+            self.rate_control_box.setCurrentIndex(
+                target_mode_index
+            )
+
+        self.target_size_box.setValue(
+            target_size
+        )
+
+        self.update_preset_recommendation()
+
+
+    def update_preset_recommendation(
+        self,
+        _value=None,
+    ):
+        """Choose the best resolution and frame rate for the size preset."""
+
+        target_size = self.export_preset_box.currentData()
+
+        if target_size is None:
+            self.preset_recommendation_label.setText(
+                "Using manually selected export settings."
+            )
+            return
+
+        if not self.auto_preset_checkbox.isChecked():
+            self.preset_recommendation_label.setText(
+                "Automatic recommendations are disabled."
+            )
+            return
+
+        if (
+            self.video_duration is None
+            or self.source_width is None
+            or self.source_height is None
+            or self.source_fps is None
+        ):
+            self.preset_recommendation_label.setText(
+                "Import a video to calculate recommended settings."
+            )
+            return
+
+        try:
+            trim_start, trim_end = self.get_trim_range()
+
+        except ValueError:
+            self.preset_recommendation_label.setText(
+                "Select a valid trim range."
+            )
+            return
+
+        duration = (
+            trim_end - trim_start
+            if trim_end is not None
+            else self.video_duration
+        )
+
+        encoder = self.encoder_box.currentData()
+
+        # -- Resolution Candidates --
+
+        # Never automatically upscale beyond the source resolution.
+        resolution_candidates = [
+            (
+                "source",
+                self.source_width,
+                self.source_height,
+            )
+        ]
+
+        for index in range(self.resolution_box.count()):
+            resolution = self.resolution_box.itemData(index)
+
+            if not isinstance(resolution, tuple):
+                continue
+
+            width, height = resolution
+
+            if (
+                width <= self.source_width
+                and height <= self.source_height
+            ):
+                resolution_candidates.append(
+                    (
+                        resolution,
+                        width,
+                        height,
+                    )
+                )
+
+        # -- Frame Rate Candidates --
+
+        # "original" preserves fractional rates such as 59.94 FPS.
+        fps_candidates = [
+            (
+                "original",
+                self.source_fps,
+            )
+        ]
+
+        for index in range(self.fps_box.count()):
+            fps = self.fps_box.itemData(index)
+
+            if not isinstance(fps, (int, float)):
+                continue
+
+            if fps <= self.source_fps:
+                fps_candidates.append(
+                    (
+                        fps,
+                        float(fps),
+                    )
+                )
+
+        # -- Evaluate Combinations --
+
+        evaluated_candidates = []
+
+        for (
+            resolution_data,
+            width,
+            height,
+        ) in resolution_candidates:
+            for fps_data, fps in fps_candidates:
+                minimum_size = (
+                    calculate_minimum_target_size_mb(
+                        duration=duration,
+                        width=width,
+                        height=height,
+                        fps=fps,
+                        encoder=encoder,
+                    )
+                )
+
+                if minimum_size is None:
+                    continue
+
+                evaluated_candidates.append({
+                    "resolution_data": resolution_data,
+                    "width": width,
+                    "height": height,
+                    "fps_data": fps_data,
+                    "fps": fps,
+                    "minimum_size": minimum_size,
+
+                    # Pixel throughput provides a simple way to rank
+                    # the amount of detail retained by each combination.
+                    "score": width * height * fps,
+                })
+
+        if not evaluated_candidates:
+            self.preset_recommendation_label.setText(
+                "A recommendation is not available for this encoder."
+            )
+            return
+
+        suitable_candidates = [
+            candidate
+            for candidate in evaluated_candidates
+            if candidate["minimum_size"] <= target_size
+        ]
+
+        if suitable_candidates:
+            recommended = max(
+                suitable_candidates,
+                key=lambda candidate: candidate["score"],
+            )
+
+            recommendation_available = True
+
+        else:
+            # Show the lightest available preset so the user can see
+            # approximately how much space would actually be required.
+            recommended = min(
+                evaluated_candidates,
+                key=lambda candidate: candidate["score"],
+            )
+
+            recommendation_available = False
+
+        # -- Apply Recommendation --
+
+        resolution_index = self.resolution_box.findData(
+            recommended["resolution_data"]
+        )
+
+        fps_index = self.fps_box.findData(
+            recommended["fps_data"]
+        )
+
+        # Prevent the programmatic changes from firing unnecessary
+        # intermediate updates while both values are being changed.
+        self.resolution_box.blockSignals(True)
+        self.fps_box.blockSignals(True)
+
+        try:
+            if resolution_index >= 0:
+                self.resolution_box.setCurrentIndex(
+                    resolution_index
+                )
+
+            if fps_index >= 0:
+                self.fps_box.setCurrentIndex(
+                    fps_index
+                )
+
+        finally:
+            self.resolution_box.blockSignals(False)
+            self.fps_box.blockSignals(False)
+
+        self.update_custom_resolution_visibility()
+        self.update_custom_fps_visibility()
+        self.update_minimum_target_size()
+
+        width = recommended["width"]
+        height = recommended["height"]
+        fps = recommended["fps"]
+        minimum_size = recommended["minimum_size"]
+
+        if recommendation_available:
+            self.preset_recommendation_label.setText(
+                f"Recommended: {width} × {height} at "
+                f"{fps:g} FPS · estimated minimum "
+                f"{minimum_size:.1f} MB"
+            )
+
+        else:
+            self.preset_recommendation_label.setText(
+                f"The {target_size:g} MB preset is too small. "
+                f"The lowest available combination is "
+                f"{width} × {height} at {fps:g} FPS, with an "
+                f"estimated minimum of {minimum_size:.1f} MB."
+            )
+
 
     def update_quality_display(self, value):
         """Display the currently selected CRF value."""
