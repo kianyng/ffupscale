@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from ffmpeg_runner import (
     calculate_minimum_target_size_mb,
+    calculate_recommended_target_size_mb,
 )
 
 # -- Settings Page --
@@ -1264,7 +1265,7 @@ class SettingsPage(QWidget):
         self,
         _value=None,
     ):
-        """Choose the best resolution and frame rate for the size preset."""
+        """Choose suitable resolution and FPS settings for a size preset."""
 
         target_size = self.export_preset_box.currentData()
 
@@ -1310,75 +1311,105 @@ class SettingsPage(QWidget):
 
         # -- Resolution Candidates --
 
-        # Never automatically upscale beyond the source resolution.
         resolution_candidates = [
+            {
+                "data": "source",
+                "width": self.source_width,
+                "height": self.source_height,
+            }
+        ]
+
+        seen_resolutions = {
             (
-                "source",
                 self.source_width,
                 self.source_height,
             )
-        ]
+        }
 
-        for index in range(self.resolution_box.count()):
-            resolution = self.resolution_box.itemData(index)
+        for index in range(
+            self.resolution_box.count()
+        ):
+            resolution = (
+                self.resolution_box.itemData(index)
+            )
 
             if not isinstance(resolution, tuple):
                 continue
 
             width, height = resolution
 
+            # Automatic presets should never upscale the source.
             if (
-                width <= self.source_width
-                and height <= self.source_height
+                width > self.source_width
+                or height > self.source_height
             ):
-                resolution_candidates.append(
-                    (
-                        resolution,
-                        width,
-                        height,
-                    )
-                )
+                continue
+
+            if resolution in seen_resolutions:
+                continue
+
+            seen_resolutions.add(resolution)
+
+            resolution_candidates.append({
+                "data": resolution,
+                "width": width,
+                "height": height,
+            })
 
         # -- Frame Rate Candidates --
 
-        # "original" preserves fractional rates such as 59.94 FPS.
         fps_candidates = [
-            (
-                "original",
-                self.source_fps,
-            )
+            {
+                "data": "original",
+                "fps": float(self.source_fps),
+            }
         ]
 
-        for index in range(self.fps_box.count()):
+        seen_frame_rates = {
+            round(float(self.source_fps), 3)
+        }
+
+        for index in range(
+            self.fps_box.count()
+        ):
             fps = self.fps_box.itemData(index)
 
-            if not isinstance(fps, (int, float)):
+            if (
+                isinstance(fps, bool)
+                or not isinstance(fps, (int, float))
+            ):
                 continue
 
-            if fps <= self.source_fps:
-                fps_candidates.append(
-                    (
-                        fps,
-                        float(fps),
-                    )
-                )
+            fps = float(fps)
 
-        # -- Evaluate Combinations --
+            # Automatic presets should never create extra frames.
+            if fps > self.source_fps:
+                continue
+
+            rounded_fps = round(fps, 3)
+
+            if rounded_fps in seen_frame_rates:
+                continue
+
+            seen_frame_rates.add(rounded_fps)
+
+            fps_candidates.append({
+                "data": self.fps_box.itemData(index),
+                "fps": fps,
+            })
+
+        # -- Evaluate Every Combination --
 
         evaluated_candidates = []
 
-        for (
-            resolution_data,
-            width,
-            height,
-        ) in resolution_candidates:
-            for fps_data, fps in fps_candidates:
+        for resolution in resolution_candidates:
+            for frame_rate in fps_candidates:
                 minimum_size = (
-                    calculate_minimum_target_size_mb(
+                    calculate_recommended_target_size_mb(
                         duration=duration,
-                        width=width,
-                        height=height,
-                        fps=fps,
+                        width=resolution["width"],
+                        height=resolution["height"],
+                        fps=frame_rate["fps"],
                         encoder=encoder,
                     )
                 )
@@ -1387,60 +1418,92 @@ class SettingsPage(QWidget):
                     continue
 
                 evaluated_candidates.append({
-                    "resolution_data": resolution_data,
-                    "width": width,
-                    "height": height,
-                    "fps_data": fps_data,
-                    "fps": fps,
+                    "resolution_data": resolution["data"],
+                    "width": resolution["width"],
+                    "height": resolution["height"],
+                    "fps_data": frame_rate["data"],
+                    "fps": frame_rate["fps"],
                     "minimum_size": minimum_size,
-
-                    # Pixel throughput provides a simple way to rank
-                    # the amount of detail retained by each combination.
-                    "score": width * height * fps,
                 })
 
         if not evaluated_candidates:
             self.preset_recommendation_label.setText(
-                "A recommendation is not available for this encoder."
+                "A recommendation is not available "
+                "for the selected encoder."
             )
             return
+
+        # A combination should not use the entire target merely to
+        # reach its estimated minimum. The remaining 20% gives the
+        # encoder additional bitrate for better visual quality.
+        quality_budget_ratio = 0.80
 
         suitable_candidates = [
             candidate
             for candidate in evaluated_candidates
-            if candidate["minimum_size"] <= target_size
+            if (
+                candidate["minimum_size"]
+                <= target_size * quality_budget_ratio
+            )
         ]
 
-        if suitable_candidates:
-            recommended = max(
-                suitable_candidates,
-                key=lambda candidate: candidate["score"],
-            )
+        recommendation_available = bool(
+            suitable_candidates
+        )
 
-            recommendation_available = True
+        if suitable_candidates:
+            candidates_to_rank = suitable_candidates
+
+            # Preserve at least 60 FPS for high-frame-rate footage
+            # whenever a viable 60 FPS option exists.
+            if self.source_fps >= 59.0:
+                smooth_candidates = [
+                    candidate
+                    for candidate in suitable_candidates
+                    if candidate["fps"] >= 59.0
+                ]
+
+                if smooth_candidates:
+                    candidates_to_rank = (
+                        smooth_candidates
+                    )
+
+            # Once unsuitable combinations have been removed,
+            # prioritise resolution and then additional frame rate.
+            recommended = max(
+                candidates_to_rank,
+                key=lambda candidate: (
+                    candidate["width"]
+                    * candidate["height"],
+                    candidate["fps"],
+                ),
+            )
 
         else:
-            # Show the lightest available preset so the user can see
-            # approximately how much space would actually be required.
+            # Nothing fits with sufficient quality headroom.
+            # Select the least demanding available combination.
             recommended = min(
                 evaluated_candidates,
-                key=lambda candidate: candidate["score"],
+                key=lambda candidate: (
+                    candidate["minimum_size"],
+                    candidate["width"]
+                    * candidate["height"],
+                    candidate["fps"],
+                ),
             )
 
-            recommendation_available = False
+        # -- Apply the Selected Combination --
 
-        # -- Apply Recommendation --
-
-        resolution_index = self.resolution_box.findData(
-            recommended["resolution_data"]
+        resolution_index = (
+            self.resolution_box.findData(
+                recommended["resolution_data"]
+            )
         )
 
         fps_index = self.fps_box.findData(
             recommended["fps_data"]
         )
 
-        # Prevent the programmatic changes from firing unnecessary
-        # intermediate updates while both values are being changed.
         self.resolution_box.blockSignals(True)
         self.fps_box.blockSignals(True)
 
@@ -1477,10 +1540,11 @@ class SettingsPage(QWidget):
 
         else:
             self.preset_recommendation_label.setText(
-                f"The {target_size:g} MB preset is too small. "
-                f"The lowest available combination is "
-                f"{width} × {height} at {fps:g} FPS, with an "
-                f"estimated minimum of {minimum_size:.1f} MB."
+                f"The {target_size:g} MB preset may be too "
+                f"small. The least demanding option is "
+                f"{width} × {height} at {fps:g} FPS, with "
+                f"an estimated minimum of "
+                f"{minimum_size:.1f} MB."
             )
 
 

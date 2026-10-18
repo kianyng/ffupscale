@@ -116,6 +116,7 @@ SUPPORTED_ENCODERS = set(ENCODER_PROFILES)
 TARGET_AUDIO_BITRATE = 128_000
 CONTAINER_OVERHEAD_RATIO = 0.02
 MINIMUM_VIDEO_BITRATE = 500_000
+TARGET_SIZE_SAFETY_RATIO = 0.97
 # Approximate bits required for each output pixel per frame.
 #
 # CPU values represent a recommended quality floor. Hardware values
@@ -133,6 +134,30 @@ MINIMUM_BITS_PER_PIXEL = {
     # Intel Quick Sync — provisional until tested on Intel hardware
     "h264_qsv": 0.011,
     "hevc_qsv": 0.006,
+}
+
+
+# Approximate bitrate requirements for visually reasonable output.
+#
+# These are intentionally higher than MINIMUM_BITS_PER_PIXEL.
+# The minimum values describe encoder limits, while these values
+# are used when automatically recommending resolution and FPS.
+RECOMMENDED_BITS_PER_PIXEL = {
+    # CPU encoders
+    "libx264": 0.016,
+    "libx265": 0.010,
+
+    # NVIDIA NVENC
+    "h264_nvenc": 0.020,
+    "hevc_nvenc": 0.012,
+
+    # AMD AMF — provisional until tested on AMD hardware
+    "h264_amf": 0.020,
+    "hevc_amf": 0.012,
+
+    # Intel Quick Sync — provisional until tested on Intel hardware
+    "h264_qsv": 0.020,
+    "hevc_qsv": 0.012,
 }
 
 
@@ -185,6 +210,63 @@ def calculate_minimum_target_size_mb(
     return minimum_size_mb
 
 
+def calculate_recommended_target_size_mb(
+    duration,
+    width,
+    height,
+    fps,
+    encoder,
+):
+    """
+    Estimate a target size likely to provide reasonable visual quality.
+
+    This is used by automatic presets and does not prevent users from
+    manually selecting more aggressive compression settings.
+    """
+
+    if (
+        duration is None
+        or duration <= 0
+        or fps is None
+        or fps <= 0
+        or width <= 0
+        or height <= 0
+    ):
+        return None
+
+    bits_per_pixel = (
+        RECOMMENDED_BITS_PER_PIXEL.get(encoder)
+    )
+
+    if bits_per_pixel is None:
+        return None
+
+    recommended_video_bitrate = int(
+        width
+        * height
+        * fps
+        * bits_per_pixel
+    )
+
+    recommended_video_bitrate = max(
+        recommended_video_bitrate,
+        MINIMUM_VIDEO_BITRATE,
+    )
+
+    recommended_size_mb = (
+        (
+            recommended_video_bitrate
+            + TARGET_AUDIO_BITRATE
+        )
+        * duration
+        / 8
+        / 1_000_000
+        / (1 - CONTAINER_OVERHEAD_RATIO)
+    )
+
+    return recommended_size_mb
+
+
 def calculate_target_video_bitrate(
     target_size_mb,
     duration,
@@ -212,7 +294,18 @@ def calculate_target_video_bitrate(
     if duration <= 0:
         raise ValueError("The video duration must be greater than zero.")
 
-    target_bits = target_size_mb * 1_000_000 * 8
+    # Aim slightly below the upload limit to allow for bitrate
+    # variation and MP4 metadata.
+    safe_target_size_mb = (
+        target_size_mb
+        * TARGET_SIZE_SAFETY_RATIO
+    )
+
+    target_bits = (
+        safe_target_size_mb
+        * 1_000_000
+        * 8
+    )
 
     usable_bits = target_bits * (1 - CONTAINER_OVERHEAD_RATIO)
 
