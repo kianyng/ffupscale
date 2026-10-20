@@ -485,15 +485,15 @@ class SettingsPage(QWidget):
         )
 
         self.trim_start_box.valueChanged.connect(
-            self.update_preset_recommendation
+            self.update_automatic_recommendation
         )
 
         self.trim_end_box.valueChanged.connect(
-            self.update_preset_recommendation
+            self.update_automatic_recommendation
         )
 
         self.trim_checkbox.toggled.connect(
-            self.update_preset_recommendation
+            self.update_automatic_recommendation
         )
 
         # -- Resolution Settings --
@@ -543,9 +543,9 @@ class SettingsPage(QWidget):
         self.custom_height.setSuffix(" px")
         self.custom_height.setSingleStep(2)
 
-        self.custom_width.valueChanged.connect(self.update_minimum_target_size)
+        self.custom_width.valueChanged.connect(self.update_target_size_estimate)
 
-        self.custom_height.valueChanged.connect(self.update_minimum_target_size)
+        self.custom_height.valueChanged.connect(self.update_target_size_estimate)
 
         custom_resolution_layout = QHBoxLayout()
         custom_resolution_layout.setContentsMargins(0, 0, 0, 0)
@@ -611,66 +611,41 @@ class SettingsPage(QWidget):
 
         self.fps_box.currentIndexChanged.connect(self.update_custom_fps_visibility)
 
-        self.fps_box.currentIndexChanged.connect(self.update_minimum_target_size)
+        self.fps_box.currentIndexChanged.connect(self.update_target_size_estimate)
 
-        self.custom_fps.valueChanged.connect(self.update_minimum_target_size)
+        self.custom_fps.valueChanged.connect(self.update_target_size_estimate)
 
-        # -- Export Presets --
-
-        self.export_preset_box = QComboBox()
-
-        self.export_preset_box.addItem(
-            "Custom settings",
-            None,
-        )
-
-        self.export_preset_box.addItem(
-            "10 MB",
-            10.0,
-        )
-
-        self.export_preset_box.addItem(
-            "25 MB",
-            25.0,
-        )
-
-        self.export_preset_box.addItem(
-            "50 MB",
-            50.0,
-        )
-
-        self.export_preset_box.addItem(
-            "100 MB",
-            100.0,
-        )
-
-        self.auto_preset_checkbox = QCheckBox(
+        self.auto_resolution_checkbox = QCheckBox(
             "Automatically choose resolution and frame rate"
         )
 
-        self.auto_preset_checkbox.setChecked(
+        self.auto_resolution_checkbox.setChecked(
             True
         )
 
-        self.preset_recommendation_label = QLabel(
-            "Select a size preset to receive a recommendation."
+        self.auto_recommendation_label = QLabel(
+            "Select Target file size under Size control "
+            "to automatically choose settings."
         )
 
-        self.preset_recommendation_label.setWordWrap(
+        self.auto_recommendation_label.setWordWrap(
             True
         )
 
-        self.preset_recommendation_label.setStyleSheet("""
+        self.auto_recommendation_label.setStyleSheet("""
             color: #999999;
             font-size: 11px;
         """)
 
-        self.export_preset_box.currentIndexChanged.connect(
-            self.apply_export_preset
+        self.auto_resolution_checkbox.toggled.connect(
+            self.update_automatic_recommendation
         )
 
-        self.auto_preset_checkbox.toggled.connect(
-            self.update_preset_recommendation
+        self.auto_resolution_checkbox.toggled.connect(
+            self.update_auto_resolution_controls
+        )
+        self.auto_resolution_checkbox.toggled.connect(
+            self.update_target_size_estimate
         )
 
         # -- Rate Control Settings --
@@ -691,7 +666,13 @@ class SettingsPage(QWidget):
             self.update_rate_control_visibility
         )
         self.rate_control_box.currentIndexChanged.connect(
-            self.update_minimum_target_size
+            self.update_target_size_estimate
+        )
+        self.rate_control_box.currentIndexChanged.connect(
+            self.update_automatic_recommendation
+        )
+        self.rate_control_box.currentIndexChanged.connect(
+            self.update_auto_resolution_controls
         )
 
         # -- Quality Settings --
@@ -801,13 +782,15 @@ class SettingsPage(QWidget):
         self.target_size_box = QDoubleSpinBox()
         self.target_size_box.setRange(1.0, 100000.0)
         self.target_size_box.setValue(100.0)
-        self.target_size_box.setDecimals(1)
+        self.target_size_box.setDecimals(3)
         self.target_size_box.setSingleStep(10.0)
         self.target_size_box.setSuffix(" MB")
 
-        self.minimum_size_label = QLabel("Estimated minimum: —")
+        self.target_size_estimate_label = QLabel(
+            "Estimated size for recommended quality: —"
+        )
 
-        self.minimum_size_label.setStyleSheet("""
+        self.target_size_estimate_label.setStyleSheet("""
             color: #999999;
             font-size: 11px;
         """)
@@ -823,7 +806,7 @@ class SettingsPage(QWidget):
 
         target_size_layout.addWidget(self.target_size_box)
 
-        target_size_layout.addWidget(self.minimum_size_label)
+        target_size_layout.addWidget(self.target_size_estimate_label)
 
         target_size_layout.addStretch()
 
@@ -832,6 +815,9 @@ class SettingsPage(QWidget):
 
         self.target_size_box.setToolTip(
             "The finished file will be approximately this size."
+        )
+        self.target_size_box.valueChanged.connect(
+            self.update_automatic_recommendation
         )
 
         self.target_size_label = QLabel("Target size:")
@@ -858,11 +844,11 @@ class SettingsPage(QWidget):
         self.encoder_box = QComboBox()
 
         self.encoder_box.currentIndexChanged.connect(
-            self.update_minimum_target_size
+            self.update_target_size_estimate
         )
 
         self.encoder_box.currentIndexChanged.connect(
-            self.update_preset_recommendation
+            self.update_automatic_recommendation
         )
 
         self.gpu_encoding_checkbox.toggled.connect(self.update_encoder_options)
@@ -1013,7 +999,7 @@ class SettingsPage(QWidget):
             self.update_custom_resolution_visibility
         )
 
-        self.resolution_box.currentIndexChanged.connect(self.update_minimum_target_size)
+        self.resolution_box.currentIndexChanged.connect(self.update_target_size_estimate)
 
         settings_form.addRow(
             "Frame rate:",
@@ -1026,18 +1012,13 @@ class SettingsPage(QWidget):
         )
 
         settings_form.addRow(
-            "Export preset:",
-            self.export_preset_box,
+            "",
+            self.auto_resolution_checkbox,
         )
 
         settings_form.addRow(
             "",
-            self.auto_preset_checkbox,
-        )
-
-        settings_form.addRow(
-            "",
-            self.preset_recommendation_label,
+            self.auto_recommendation_label,
         )
 
         settings_form.addRow(
@@ -1239,7 +1220,7 @@ class SettingsPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 20, 30, 30)
-        layout.setSpacing(20)
+        layout.setSpacing(10)
 
         layout.addLayout(header_section_layout)
 
@@ -1256,6 +1237,7 @@ class SettingsPage(QWidget):
 
         self.update_custom_resolution_visibility()
         self.update_custom_fps_visibility()
+        self.update_auto_resolution_controls()
         self.update_rate_control_visibility()
         self.update_trim_controls()
 
@@ -1307,7 +1289,7 @@ class SettingsPage(QWidget):
             else "—"
         )
         self.video_file_size.setText(
-            f"{file_size / (1024 * 1024):.2f} MB"
+            f"{file_size / 1_000_000:.2f} MB"
             if file_size is not None
             else "—"
         )
@@ -1316,6 +1298,31 @@ class SettingsPage(QWidget):
         self.source_fps = source_fps
         self.source_width = source_width
         self.source_height = source_height
+
+        if file_size is not None and file_size > 0:
+            if file_size >= 1000:
+                self.target_size_box.setDecimals(3)
+                maximum_target_size_mb = (
+                    file_size // 1000 / 1000
+                )
+            else:
+                self.target_size_box.setDecimals(6)
+                maximum_target_size_mb = file_size / 1_000_000
+
+            self.target_size_box.setRange(
+                min(1.0, maximum_target_size_mb),
+                maximum_target_size_mb,
+            )
+            self.target_size_box.setToolTip(
+                "The finished file will be approximately this size. "
+                "The target cannot exceed the input file size."
+            )
+
+        else:
+            self.target_size_box.setRange(1.0, 100000.0)
+            self.target_size_box.setToolTip(
+                "The finished file will be approximately this size."
+            )
 
         # QDoubleSpinBox displays milliseconds, so round down
         # to avoid placing the end slightly beyond the source.
@@ -1364,8 +1371,8 @@ class SettingsPage(QWidget):
 
         self.update_output_path_preview()
         self.update_trim_controls()
-        self.update_minimum_target_size()
-        self.update_preset_recommendation()
+        self.update_target_size_estimate()
+        self.update_automatic_recommendation()
 
     def browse_output_folder(self):
         """Ask the user where the rendered video should be saved."""
@@ -1536,7 +1543,7 @@ class SettingsPage(QWidget):
                 f"Selected duration: {timecode}"
             )
 
-        self.update_minimum_target_size()
+        self.update_target_size_estimate()
 
     def reset_trim_range(self):
         """Select the complete source video."""
@@ -1623,60 +1630,48 @@ class SettingsPage(QWidget):
 
         self.custom_fps.setVisible(custom_selected)
 
+    def update_auto_resolution_controls(self):
+        """Disable manual resolution and frame-rate controls when automatic."""
 
-    def apply_export_preset(
-        self,
-        _index=None,
-    ):
-        """Apply the size represented by the selected preset."""
-
-        target_size = (
-            self.export_preset_box.currentData()
+        target_size_selected = (
+            self.rate_control_box.currentData() == "target_size"
         )
-
-        if target_size is None:
-            self.preset_recommendation_label.setText(
-                "Using manually selected export settings."
-            )
-            return
-
-        target_mode_index = (
-            self.rate_control_box.findData(
-                "target_size"
-            )
+        automatic_selection_active = (
+            self.auto_resolution_checkbox.isChecked()
+            and target_size_selected
         )
+        manual_controls_enabled = not automatic_selection_active
 
-        if target_mode_index >= 0:
-            self.rate_control_box.setCurrentIndex(
-                target_mode_index
-            )
+        self.auto_resolution_checkbox.setEnabled(target_size_selected)
+        self.resolution_box.setEnabled(manual_controls_enabled)
+        self.custom_resolution_label.setEnabled(manual_controls_enabled)
+        self.custom_resolution_widget.setEnabled(manual_controls_enabled)
 
-        self.target_size_box.setValue(
-            target_size
-        )
-
-        self.update_preset_recommendation()
+        self.fps_box.setEnabled(manual_controls_enabled)
+        self.custom_fps_label.setEnabled(manual_controls_enabled)
+        self.custom_fps.setEnabled(manual_controls_enabled)
 
 
-    def update_preset_recommendation(
+    def update_automatic_recommendation(
         self,
         _value=None,
     ):
-        """Choose suitable resolution and FPS settings for a size preset."""
+        """Choose suitable resolution and FPS settings for the target size."""
 
-        target_size = self.export_preset_box.currentData()
-
-        if target_size is None:
-            self.preset_recommendation_label.setText(
-                "Using manually selected export settings."
-            )
-            return
-
-        if not self.auto_preset_checkbox.isChecked():
-            self.preset_recommendation_label.setText(
+        if not self.auto_resolution_checkbox.isChecked():
+            self.auto_recommendation_label.setText(
                 "Automatic recommendations are disabled."
             )
             return
+
+        if self.rate_control_box.currentData() != "target_size":
+            self.auto_recommendation_label.setText(
+                "Select Target file size under Size control "
+                "to automatically choose settings."
+            )
+            return
+
+        target_size = self.target_size_box.value()
 
         if (
             self.video_duration is None
@@ -1684,7 +1679,7 @@ class SettingsPage(QWidget):
             or self.source_height is None
             or self.source_fps is None
         ):
-            self.preset_recommendation_label.setText(
+            self.auto_recommendation_label.setText(
                 "Import a video to calculate recommended settings."
             )
             return
@@ -1693,7 +1688,7 @@ class SettingsPage(QWidget):
             trim_start, trim_end = self.get_trim_range()
 
         except ValueError:
-            self.preset_recommendation_label.setText(
+            self.auto_recommendation_label.setText(
                 "Select a valid trim range."
             )
             return
@@ -1801,7 +1796,7 @@ class SettingsPage(QWidget):
 
         for resolution in resolution_candidates:
             for frame_rate in fps_candidates:
-                minimum_size = (
+                estimated_size = (
                     calculate_recommended_target_size_mb(
                         duration=duration,
                         width=resolution["width"],
@@ -1811,7 +1806,7 @@ class SettingsPage(QWidget):
                     )
                 )
 
-                if minimum_size is None:
+                if estimated_size is None:
                     continue
 
                 evaluated_candidates.append({
@@ -1820,27 +1815,21 @@ class SettingsPage(QWidget):
                     "height": resolution["height"],
                     "fps_data": frame_rate["data"],
                     "fps": frame_rate["fps"],
-                    "minimum_size": minimum_size,
+                    "estimated_size": estimated_size,
                 })
 
         if not evaluated_candidates:
-            self.preset_recommendation_label.setText(
+            self.auto_recommendation_label.setText(
                 "A recommendation is not available "
                 "for the selected encoder."
             )
             return
 
-        # A combination should not use the entire target merely to
-        # reach its estimated minimum. The remaining 20% gives the
-        # encoder additional bitrate for better visual quality.
-        quality_budget_ratio = 0.80
-
         suitable_candidates = [
             candidate
             for candidate in evaluated_candidates
             if (
-                candidate["minimum_size"]
-                <= target_size * quality_budget_ratio
+                candidate["estimated_size"] <= target_size
             )
         ]
 
@@ -1849,43 +1838,27 @@ class SettingsPage(QWidget):
         )
 
         if suitable_candidates:
-            candidates_to_rank = suitable_candidates
-
-            # Preserve at least 60 FPS for high-frame-rate footage
-            # whenever a viable 60 FPS option exists.
-            if self.source_fps >= 59.0:
-                smooth_candidates = [
-                    candidate
-                    for candidate in suitable_candidates
-                    if candidate["fps"] >= 59.0
-                ]
-
-                if smooth_candidates:
-                    candidates_to_rank = (
-                        smooth_candidates
-                    )
-
-            # Once unsuitable combinations have been removed,
-            # prioritise resolution and then additional frame rate.
+            # Use as much of the target budget as possible, then favor
+            # higher frame rates and resolution.
             recommended = max(
-                candidates_to_rank,
+                suitable_candidates,
                 key=lambda candidate: (
+                    candidate["estimated_size"],
+                    candidate["fps"],
                     candidate["width"]
                     * candidate["height"],
-                    candidate["fps"],
                 ),
             )
 
         else:
-            # Nothing fits with sufficient quality headroom.
-            # Select the least demanding available combination.
+            # No option fits the target; choose the closest estimate.
             recommended = min(
                 evaluated_candidates,
                 key=lambda candidate: (
-                    candidate["minimum_size"],
+                    candidate["estimated_size"],
+                    -candidate["fps"],
                     candidate["width"]
                     * candidate["height"],
-                    candidate["fps"],
                 ),
             )
 
@@ -1921,27 +1894,26 @@ class SettingsPage(QWidget):
 
         self.update_custom_resolution_visibility()
         self.update_custom_fps_visibility()
-        self.update_minimum_target_size()
+        self.update_target_size_estimate()
 
         width = recommended["width"]
         height = recommended["height"]
         fps = recommended["fps"]
-        minimum_size = recommended["minimum_size"]
+        estimated_size = recommended["estimated_size"]
 
         if recommendation_available:
-            self.preset_recommendation_label.setText(
+            self.auto_recommendation_label.setText(
                 f"Recommended: {width} × {height} at "
-                f"{fps:g} FPS · estimated minimum "
-                f"{minimum_size:.1f} MB"
+                f"{fps:g} FPS"
             )
 
         else:
-            self.preset_recommendation_label.setText(
-                f"The {target_size:g} MB preset may be too "
-                f"small. The least demanding option is "
-                f"{width} × {height} at {fps:g} FPS, with "
-                f"an estimated minimum of "
-                f"{minimum_size:.1f} MB."
+            self.auto_recommendation_label.setText(
+                f"The {target_size:g} MB target is below the "
+                f"estimated size for recommended quality "
+                f"({estimated_size:.2f} MB) at the least demanding "
+                f"available setting: {width} × {height} at "
+                f"{fps:g} FPS."
             )
 
 
@@ -1951,16 +1923,28 @@ class SettingsPage(QWidget):
         self.quality_value.setText(str(value))
         self.update_quality_size_estimate()
 
-    def update_minimum_target_size(
+    def update_target_size_estimate(
         self,
         _value=None,
     ):
-        """Update the estimated minimum for the current settings."""
+        """Update the appropriate size estimate for current settings."""
 
         self.update_quality_size_estimate()
 
+        automatic_selection = (
+            self.auto_resolution_checkbox.isChecked()
+        )
+        if automatic_selection:
+            estimate_function = calculate_recommended_target_size_mb
+            estimate_label = "Estimated size for recommended quality"
+        else:
+            estimate_function = calculate_minimum_target_size_mb
+            estimate_label = "Estimated minimum"
+
         if self.video_duration is None or self.source_fps is None:
-            self.minimum_size_label.setText("Estimated minimum: —")
+            self.target_size_estimate_label.setText(
+                f"{estimate_label}: —"
+            )
             return
 
         try:
@@ -1970,7 +1954,9 @@ class SettingsPage(QWidget):
             )
 
         except ValueError:
-            self.minimum_size_label.setText("Estimated minimum: —")
+            self.target_size_estimate_label.setText(
+                f"{estimate_label}: —"
+            )
             return
 
         effective_duration = (
@@ -1985,7 +1971,7 @@ class SettingsPage(QWidget):
 
         encoder = self.encoder_box.currentData()
 
-        minimum_size = calculate_minimum_target_size_mb(
+        estimated_size = estimate_function(
             duration=effective_duration,
             width=width,
             height=height,
@@ -1993,34 +1979,31 @@ class SettingsPage(QWidget):
             encoder=encoder,
         )
 
-        if minimum_size is None:
-            self.minimum_size_label.setText("Estimated minimum: not available")
+        if estimated_size is None:
+            self.target_size_estimate_label.setText(
+                f"{estimate_label}: not available"
+            )
             return
 
-        if encoder in {
-            "libx264",
-            "libx265",
-        }:
-            label_text = f"Recommended minimum: {minimum_size:.1f} MB"
-
-        elif encoder in {
-            "h264_amf",
-            "hevc_amf",
-            "h264_qsv",
-            "hevc_qsv",
-        }:
-            label_text = f"Estimated minimum: {minimum_size:.1f} MB*"
-
-        else:
-            label_text = f"Estimated minimum: {minimum_size:.1f} MB"
-
-        self.minimum_size_label.setText(label_text)
-
-        self.minimum_size_label.setToolTip(
-            "This is an estimate based on the codec, resolution and "
-            "frame rate. Actual requirements depend on the video content. "
-            "AMD and Intel estimates are provisional."
+        self.target_size_estimate_label.setText(
+            f"{estimate_label}: {estimated_size:.2f} MB"
         )
+
+        if automatic_selection:
+            tooltip = (
+                "This uses the same quality-oriented estimate as automatic "
+                "resolution and frame-rate selection. Actual file size and "
+                "quality depend on the video content. An encoder's technical "
+                "bitrate limit, when enforced, is checked separately at render."
+            )
+        else:
+            tooltip = (
+                "This is an estimated practical minimum for the selected "
+                "resolution, frame rate and encoder. Actual requirements "
+                "depend on video content. Enforced encoder limits are "
+                "checked separately at render."
+            )
+        self.target_size_estimate_label.setToolTip(tooltip)
 
     def update_quality_size_estimate(self):
         """Show a cached estimate or queue a background sample encode."""
@@ -2624,4 +2607,4 @@ class SettingsPage(QWidget):
                 break
 
         self.encoder_box.blockSignals(False)
-        self.update_minimum_target_size()
+        self.update_target_size_estimate()
