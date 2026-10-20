@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -45,6 +46,8 @@ class RenderJob:
     status: RenderStatus = RenderStatus.WAITING
     progress: int = 0
     error_message: str | None = None
+    _progress_fraction: float = field(default=0.0, init=False, repr=False)
+    _render_started_at: float | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         """Normalize paths and validate the selected trim range."""
@@ -221,9 +224,54 @@ class RenderJob:
     def resolution_text(self):
         return f"{self.width} × {self.height}"
 
+    @property
+    def remaining_time_text(self):
+        """Return a live render-time estimate suitable for progress displays."""
+
+        if self.status != RenderStatus.RENDERING:
+            return None
+
+        if self._progress_fraction >= 1:
+            return "Finalizing..."
+
+        if (
+            self._render_started_at is None
+            or self._progress_fraction < 0.01
+        ):
+            return "Estimating remaining time..."
+
+        elapsed = time.monotonic() - self._render_started_at
+
+        if elapsed < 3:
+            return "Estimating remaining time..."
+
+        remaining_seconds = (
+            elapsed
+            * (1 - self._progress_fraction)
+            / self._progress_fraction
+        )
+        return f"About {self.format_remaining_time(remaining_seconds)} remaining"
+
+    @staticmethod
+    def format_remaining_time(seconds):
+        """Format an estimated duration as compact hours, minutes and seconds."""
+
+        total_seconds = max(1, round(seconds))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        if hours:
+            return f"{hours}h {minutes}m"
+
+        if minutes:
+            return f"{minutes}m {seconds}s"
+
+        return f"{seconds}s"
+
     def set_progress(self, percentage):
         """Store progress as a value between 0 and 100."""
 
+        self._progress_fraction = max(0.0, min(100.0, float(percentage))) / 100
         self.progress = max(
             0,
             min(100, int(percentage)),
@@ -234,16 +282,22 @@ class RenderJob:
     def mark_waiting(self):
         self.status = RenderStatus.WAITING
         self.progress = 0
+        self._progress_fraction = 0.0
+        self._render_started_at = None
         self.error_message = None
 
     def mark_rendering(self):
         self.status = RenderStatus.RENDERING
         self.progress = 0
+        self._progress_fraction = 0.0
+        self._render_started_at = time.monotonic()
         self.error_message = None
 
     def mark_completed(self):
         self.status = RenderStatus.COMPLETED
         self.progress = 100
+        self._progress_fraction = 1.0
+        self._render_started_at = None
         self.error_message = None
 
     def mark_failed(self, message):

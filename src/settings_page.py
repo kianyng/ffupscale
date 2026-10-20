@@ -2388,6 +2388,7 @@ class SettingsPage(QWidget):
         else:
             self.render_button.setText("Render")
             self.render_button.setEnabled(True)
+            self.progress_bar.setFormat("%p%")
 
     def set_cancelling(self):
         """Prevent repeated cancellation requests while FFmpeg is stopping."""
@@ -2395,11 +2396,18 @@ class SettingsPage(QWidget):
         self.render_button.setText("Cancelling...")
         self.render_button.setEnabled(False)
 
-    def set_progress(self, percentage):
-        """Clamp FFmpeg progress to the range accepted by QProgressBar."""
+    def set_progress(self, percentage, remaining_time_text=None):
+        """Update render progress and its estimated remaining time."""
 
         percentage = max(0, min(100, int(percentage)))
         self.progress_bar.setValue(percentage)
+        if self.is_rendering:
+            remaining_time_text = (
+                remaining_time_text or "Estimating remaining time..."
+            )
+            self.progress_bar.setFormat(
+                f"%p% · {remaining_time_text}"
+            )
 
     # -- Hardware Encoder Options --
 

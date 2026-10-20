@@ -158,6 +158,12 @@ class QueueJobRow(QFrame):
             RenderStatus.COMPLETED,
         }
 
+        if job.status == RenderStatus.RENDERING:
+            self.progress_bar.setFormat(
+                f"%p% · {job.remaining_time_text}"
+            )
+        else:
+            self.progress_bar.setFormat("%p%")
         self.progress_bar.setVisible(show_progress)
 
         self.remove_button.setVisible(job.status != RenderStatus.RENDERING)

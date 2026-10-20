@@ -803,7 +803,10 @@ class MainWindow(QMainWindow):
 
                         self.current_job.set_progress(percentage)
 
-                        self.settings_page.set_progress(percentage)
+                        self.settings_page.set_progress(
+                            percentage,
+                            self.current_job.remaining_time_text,
+                        )
 
                         self.queue_page.update_job(
                             self.current_job,
@@ -816,7 +819,10 @@ class MainWindow(QMainWindow):
             elif key == "progress" and value == "end" and self.current_job is not None:
                 self.current_job.set_progress(100)
 
-                self.settings_page.set_progress(100)
+                self.settings_page.set_progress(
+                    100,
+                    self.current_job.remaining_time_text,
+                )
 
                 self.queue_page.update_job(
                     self.current_job,
