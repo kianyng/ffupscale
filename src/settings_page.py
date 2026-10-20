@@ -1,7 +1,11 @@
+import subprocess
+import tempfile
+import threading
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QThread, QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -20,10 +24,238 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ffmpeg_manager import hidden_process_flags
 from ffmpeg_runner import (
+    calculate_estimated_quality_size_mb,
     calculate_minimum_target_size_mb,
     calculate_recommended_target_size_mb,
+    build_upscale_command,
+    get_audio_stream_codecs,
 )
+
+
+QUALITY_ESTIMATE_SAMPLE_DURATION = 1.0
+QUALITY_ESTIMATE_MAX_SAMPLED_DURATION = 3.0
+
+
+class QualityEstimateWorker(QThread):
+    """Estimate output size by encoding short video samples in the background."""
+
+    estimate_ready = pyqtSignal(int, object, int, float)
+    estimate_failed = pyqtSignal(int, object, str)
+
+    def __init__(
+        self,
+        generation,
+        estimate_key,
+        settings,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.generation = generation
+        self.estimate_key = estimate_key
+        self.settings = settings
+        self.cancel_requested = threading.Event()
+        self.process_lock = threading.Lock()
+        self.active_process = None
+
+    def cancel(self):
+        """Request cancellation and stop the currently running FFmpeg process."""
+
+        self.cancel_requested.set()
+
+        with self.process_lock:
+            process = self.active_process
+
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+
+            except ProcessLookupError:
+                pass
+
+    def run(self):
+        try:
+            estimated_size = self.estimate_output_size()
+
+        except (
+            OSError,
+            ValueError,
+            subprocess.SubprocessError,
+        ) as error:
+            if not self.cancel_requested.is_set():
+                self.estimate_failed.emit(
+                    self.generation,
+                    self.estimate_key,
+                    str(error),
+                )
+
+        else:
+            if (
+                estimated_size is not None
+                and not self.cancel_requested.is_set()
+            ):
+                self.estimate_ready.emit(
+                    self.generation,
+                    self.estimate_key,
+                    self.settings["quality"],
+                    estimated_size,
+                )
+
+    def estimate_output_size(self):
+        """Encode up to three representative segments and extrapolate their size."""
+
+        settings = self.settings
+        duration = settings["trim_end"] - settings["trim_start"]
+
+        if duration <= 0:
+            raise ValueError("The selected video range has no duration.")
+
+        if duration <= QUALITY_ESTIMATE_MAX_SAMPLED_DURATION:
+            sample_ranges = [
+                (
+                    settings["trim_start"],
+                    settings["trim_end"],
+                )
+            ]
+
+        else:
+            sample_duration = QUALITY_ESTIMATE_SAMPLE_DURATION
+            start_offsets = (
+                0.0,
+                (duration - sample_duration) / 2,
+                duration - sample_duration,
+            )
+            sample_ranges = [
+                (
+                    settings["trim_start"] + offset,
+                    settings["trim_start"] + offset + sample_duration,
+                )
+                for offset in start_offsets
+            ]
+
+        input_path = settings["input_path"]
+        audio_stream_codecs = get_audio_stream_codecs(input_path)
+
+        sampled_bytes = 0
+        sampled_duration = 0.0
+
+        with tempfile.TemporaryDirectory(
+            prefix="ffupscale-estimate-"
+        ) as temporary_directory:
+            temporary_path = Path(temporary_directory)
+
+            for index, (sample_start, sample_end) in enumerate(sample_ranges):
+                if self.cancel_requested.is_set():
+                    return None
+
+                sample_duration = sample_end - sample_start
+                output_path = temporary_path / f"sample_{index}.mp4"
+
+                ffmpeg_path, arguments = build_upscale_command(
+                    input_path=input_path,
+                    output_path=output_path,
+                    width=settings["width"],
+                    height=settings["height"],
+                    quality=settings["quality"],
+                    fps=settings["fps"],
+                    encoder=settings["encoder"],
+                    preset=settings["preset"],
+                    rate_control="quality",
+                    duration=settings["source_duration"],
+                    source_fps=settings["source_fps"],
+                    trim_start=sample_start,
+                    trim_end=sample_end,
+                    merge_audio_tracks=settings["merge_audio_tracks"],
+                    audio_stream_codecs=audio_stream_codecs,
+                )
+
+                arguments[0:0] = ["-v", "error"]
+                if self.cancel_requested.is_set():
+                    return None
+
+                error_log_path = (
+                    temporary_path / f"sample_{index}.log"
+                )
+
+                with error_log_path.open("wb") as error_log:
+                    process = subprocess.Popen(
+                        [ffmpeg_path, *arguments],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=error_log,
+                        creationflags=(
+                            hidden_process_flags()
+                            | getattr(
+                                subprocess,
+                                "BELOW_NORMAL_PRIORITY_CLASS",
+                                0,
+                            )
+                        ),
+                    )
+
+                    with self.process_lock:
+                        self.active_process = process
+                        cancelled = self.cancel_requested.is_set()
+
+                    if cancelled:
+                        self._terminate_process(process)
+
+                    while not cancelled and process.poll() is None:
+                        if self.cancel_requested.wait(0.1):
+                            self._terminate_process(process)
+                            cancelled = True
+
+                    with self.process_lock:
+                        if self.active_process is process:
+                            self.active_process = None
+
+                    if cancelled:
+                        return None
+
+                error_output = error_log_path.read_text(
+                    encoding="utf-8",
+                    errors="replace",
+                )
+
+                if process.returncode != 0:
+                    raise ValueError(
+                        "FFmpeg could not estimate the output size."
+                        + (
+                            f"\n\n{error_output.strip()}"
+                            if error_output.strip()
+                            else ""
+                        )
+                    )
+
+                sampled_bytes += output_path.stat().st_size
+                sampled_duration += sample_duration
+
+        return (
+            sampled_bytes
+            / sampled_duration
+            * duration
+            / 1_000_000
+        )
+
+    @staticmethod
+    def _terminate_process(process):
+        """Stop a sample encode promptly when it is cancelled."""
+
+        if process.poll() is None:
+            try:
+                process.terminate()
+
+            except ProcessLookupError:
+                pass
+
+        try:
+            process.wait(timeout=1.0)
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
 
 # -- Settings Page --
 
@@ -49,6 +281,25 @@ class SettingsPage(QWidget):
         self.source_fps = None
         self.source_width = None
         self.source_height = None
+        self.quality_estimate_generation = 0
+        self.quality_estimate_worker = None
+        self.pending_quality_estimate = None
+        self.current_quality_estimate_key = None
+        self.quality_estimate_cache = {}
+
+        self.quality_estimate_timer = QTimer(self)
+        self.quality_estimate_timer.setSingleShot(True)
+        self.quality_estimate_timer.setInterval(400)
+        self.quality_estimate_timer.timeout.connect(
+            self.start_quality_estimate
+        )
+
+        application = QApplication.instance()
+
+        if application is not None:
+            application.aboutToQuit.connect(
+                self.shutdown_quality_estimate
+            )
 
         # -- Page Header --
 
@@ -364,6 +615,9 @@ class SettingsPage(QWidget):
         self.rate_control_box.currentIndexChanged.connect(
             self.update_rate_control_visibility
         )
+        self.rate_control_box.currentIndexChanged.connect(
+            self.update_minimum_target_size
+        )
 
         # -- Quality Settings --
 
@@ -442,6 +696,16 @@ class SettingsPage(QWidget):
             font-size: 11px;
         """)
 
+        self.quality_size_label = QLabel("Estimated size: —")
+        self.quality_size_label.setStyleSheet("""
+            color: #999999;
+            font-size: 11px;
+        """)
+        self.quality_size_label.setToolTip(
+            "A rough estimate based on the selected codec, resolution, "
+            "frame rate and quality. Actual size varies with video content."
+        )
+
         quality_widget_layout = QVBoxLayout()
         quality_widget_layout.setContentsMargins(
             0,
@@ -451,6 +715,7 @@ class SettingsPage(QWidget):
         )
         quality_widget_layout.setSpacing(4)
         quality_widget_layout.addLayout(quality_controls_layout)
+        quality_widget_layout.addWidget(self.quality_size_label)
         quality_widget_layout.addWidget(quality_help)
 
         self.quality_widget = QWidget()
@@ -548,6 +813,9 @@ class SettingsPage(QWidget):
         )
 
         self.preset_box.setCurrentIndex(1)
+        self.preset_box.currentIndexChanged.connect(
+            self.update_quality_size_estimate
+        )
 
         # -- Output Settings --
 
@@ -600,6 +868,9 @@ class SettingsPage(QWidget):
 
         self.merge_audio_tracks_checkbox = QCheckBox(
             "Merge all audio tracks into one"
+        )
+        self.merge_audio_tracks_checkbox.toggled.connect(
+            self.update_quality_size_estimate
         )
         self.merge_audio_tracks_checkbox.setToolTip(
             "Mixes all audio tracks together into one track, which can help "
@@ -833,7 +1104,7 @@ class SettingsPage(QWidget):
 
         self.back_button = QPushButton("Back")
 
-        self.back_button.clicked.connect(self.back_requested.emit)
+        self.back_button.clicked.connect(self.request_back)
 
         self.back_button.setStyleSheet("""
             QPushButton {
@@ -1572,12 +1843,15 @@ class SettingsPage(QWidget):
         """Display the currently selected CRF value."""
 
         self.quality_value.setText(str(value))
+        self.update_quality_size_estimate()
 
     def update_minimum_target_size(
         self,
         _value=None,
     ):
         """Update the estimated minimum for the current settings."""
+
+        self.update_quality_size_estimate()
 
         if self.video_duration is None or self.source_fps is None:
             self.minimum_size_label.setText("Estimated minimum: —")
@@ -1641,6 +1915,345 @@ class SettingsPage(QWidget):
             "frame rate. Actual requirements depend on the video content. "
             "AMD and Intel estimates are provisional."
         )
+
+    def update_quality_size_estimate(self):
+        """Show a cached estimate or queue a background sample encode."""
+
+        self.quality_estimate_timer.stop()
+
+        if self.rate_control_box.currentData() != "quality":
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText("Estimated size: —")
+            return
+
+        if (
+            self.input_path is None
+            or self.video_duration is None
+            or self.source_fps is None
+        ):
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText("Estimated size: —")
+            return
+
+        try:
+            width, height = self.get_resolution()
+            trim_start, trim_end = self.get_trim_range()
+
+        except ValueError:
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText("Estimated size: —")
+            return
+
+        selected_end = (
+            trim_end
+            if trim_end is not None
+            else self.video_duration
+        )
+        selected_duration = selected_end - trim_start
+
+        if selected_duration <= 0:
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText(
+                "Estimated size: unavailable"
+            )
+            return
+
+        encoder = self.encoder_box.currentData()
+        preset = self.preset_box.currentData()
+        selected_fps = self.get_fps()
+        estimate_key = (
+            str(self.input_path),
+            self.video_duration,
+            self.source_fps,
+            trim_start,
+            selected_end,
+            width,
+            height,
+            selected_fps,
+            encoder,
+            preset,
+            self.merge_audio_tracks_checkbox.isChecked(),
+        )
+        settings = {
+            "input_path": str(self.input_path),
+            "source_duration": self.video_duration,
+            "source_fps": self.source_fps,
+            "trim_start": trim_start,
+            "trim_end": selected_end,
+            "width": width,
+            "height": height,
+            "quality": self.quality_slider.value(),
+            "fps": selected_fps,
+            "encoder": encoder,
+            "preset": preset,
+            "merge_audio_tracks": (
+                self.merge_audio_tracks_checkbox.isChecked()
+            ),
+        }
+        self.current_quality_estimate_key = estimate_key
+
+        cached_estimate = self.quality_estimate_cache.get(
+            estimate_key
+        )
+
+        if cached_estimate is not None:
+            self._cancel_worker_for_different_estimate(estimate_key)
+            self.pending_quality_estimate = None
+            self.quality_size_label.setToolTip(
+                "Estimated by encoding short samples from this video. "
+                "Actual size may vary with scenes not sampled."
+            )
+            self._display_calibrated_quality_estimate(
+                cached_estimate[0],
+                cached_estimate[1],
+                selected_duration,
+                width,
+                height,
+                encoder,
+            )
+            return
+
+        worker = self.quality_estimate_worker
+
+        if (
+            worker is not None
+            and worker.estimate_key == estimate_key
+            and not worker.cancel_requested.is_set()
+        ):
+            self.pending_quality_estimate = None
+            self.quality_size_label.setText(
+                "Estimated size: estimating..."
+            )
+            return
+
+        self._cancel_worker_for_different_estimate(estimate_key)
+        self.pending_quality_estimate = (
+            estimate_key,
+            settings,
+        )
+        self.quality_size_label.setText(
+            "Estimated size: estimating..."
+        )
+        self.quality_estimate_timer.start()
+
+    def _display_calibrated_quality_estimate(
+        self,
+        reference_size_mb,
+        reference_quality,
+        duration,
+        width,
+        height,
+        encoder,
+    ):
+        """Apply the cached sample calibration to the current slider value."""
+
+        effective_fps = self.get_fps()
+
+        if effective_fps is None:
+            effective_fps = self.source_fps
+
+        reference_model_size = calculate_estimated_quality_size_mb(
+            duration=duration,
+            width=width,
+            height=height,
+            fps=effective_fps,
+            encoder=encoder,
+            quality=reference_quality,
+        )
+        current_model_size = calculate_estimated_quality_size_mb(
+            duration=duration,
+            width=width,
+            height=height,
+            fps=effective_fps,
+            encoder=encoder,
+            quality=self.quality_slider.value(),
+        )
+
+        if (
+            reference_model_size is None
+            or current_model_size is None
+            or reference_model_size <= 0
+        ):
+            self.quality_size_label.setText(
+                "Estimated size: unavailable"
+            )
+            return
+
+        estimated_size = (
+            reference_size_mb
+            * current_model_size
+            / reference_model_size
+        )
+
+        if estimated_size >= 1000:
+            formatted_size = f"{estimated_size / 1000:.2f} GB"
+
+        else:
+            formatted_size = f"{estimated_size:.1f} MB"
+
+        self.quality_size_label.setText(
+            f"Estimated size: {formatted_size}"
+        )
+
+    def _cancel_worker_for_different_estimate(self, estimate_key):
+        worker = self.quality_estimate_worker
+
+        if (
+            worker is not None
+            and worker.isRunning()
+            and worker.estimate_key != estimate_key
+        ):
+            self.quality_estimate_generation += 1
+            worker.cancel()
+
+    def start_quality_estimate(self):
+        """Start the newest queued estimate when no older worker is running."""
+
+        if self.quality_estimate_worker is not None:
+            if self.quality_estimate_worker.isRunning():
+                return
+
+            self.quality_estimate_worker.deleteLater()
+            self.quality_estimate_worker = None
+
+        if self.pending_quality_estimate is None:
+            return
+
+        estimate_key, settings = self.pending_quality_estimate
+        self.pending_quality_estimate = None
+        self.quality_estimate_generation += 1
+
+        worker = QualityEstimateWorker(
+            generation=self.quality_estimate_generation,
+            estimate_key=estimate_key,
+            settings=settings,
+            parent=self,
+        )
+        worker.estimate_ready.connect(
+            self.handle_quality_estimate_ready
+        )
+        worker.estimate_failed.connect(
+            self.handle_quality_estimate_failed
+        )
+        worker.finished.connect(
+            self.handle_quality_estimate_finished
+        )
+
+        self.quality_estimate_worker = worker
+        worker.start()
+
+    def handle_quality_estimate_ready(
+        self,
+        generation,
+        estimate_key,
+        reference_quality,
+        estimated_size,
+    ):
+        """Cache a sample result and display it if it is still current."""
+
+        self.quality_estimate_cache[estimate_key] = (
+            estimated_size,
+            reference_quality,
+        )
+
+        if len(self.quality_estimate_cache) > 8:
+            oldest_key = next(iter(self.quality_estimate_cache))
+            self.quality_estimate_cache.pop(oldest_key)
+
+        if (
+            generation != self.quality_estimate_generation
+            or estimate_key != self.current_quality_estimate_key
+        ):
+            return
+
+        try:
+            width, height = self.get_resolution()
+            trim_start, trim_end = self.get_trim_range()
+
+        except ValueError:
+            return
+
+        duration = (
+            trim_end - trim_start
+            if trim_end is not None
+            else self.video_duration - trim_start
+        )
+        self.quality_size_label.setToolTip(
+            "Estimated by encoding short samples from this video. "
+            "Actual size may vary with scenes not sampled."
+        )
+        self._display_calibrated_quality_estimate(
+            estimated_size,
+            reference_quality,
+            duration,
+            width,
+            height,
+            self.encoder_box.currentData(),
+        )
+
+    def handle_quality_estimate_failed(
+        self,
+        generation,
+        estimate_key,
+        error_message,
+    ):
+        """Report sample-encoding failures without blocking settings use."""
+
+        if (
+            generation != self.quality_estimate_generation
+            or estimate_key != self.current_quality_estimate_key
+        ):
+            return
+
+        self.quality_size_label.setText(
+            "Estimated size: unavailable"
+        )
+        self.quality_size_label.setToolTip(
+            f"Could not estimate output size:\n{error_message}"
+        )
+
+    def handle_quality_estimate_finished(self):
+        """Release a finished worker and start any newer pending estimate."""
+
+        worker = self.sender()
+
+        if worker is not self.quality_estimate_worker:
+            return
+
+        self.quality_estimate_worker = None
+        worker.deleteLater()
+
+        if (
+            self.pending_quality_estimate is not None
+            and not self.quality_estimate_timer.isActive()
+        ):
+            self.quality_estimate_timer.start(0)
+
+    def cancel_quality_estimate(self):
+        """Discard pending work and invalidate any result already in flight."""
+
+        self.quality_estimate_timer.stop()
+        self.pending_quality_estimate = None
+        self.current_quality_estimate_key = None
+        self.quality_estimate_generation += 1
+
+        if self.quality_estimate_worker is not None:
+            self.quality_estimate_worker.cancel()
+
+    def request_back(self):
+        """Stop background sampling before leaving the settings page."""
+
+        self.cancel_quality_estimate()
+        self.back_requested.emit()
+
+    def shutdown_quality_estimate(self):
+        """Stop and join the estimator before the application exits."""
+
+        self.cancel_quality_estimate()
+        worker = self.quality_estimate_worker
+
+        if worker is not None and worker.isRunning():
+            worker.wait()
 
     def get_fps(self):
         """Return None to preserve FPS, or the selected numeric value."""
@@ -1727,6 +2340,8 @@ class SettingsPage(QWidget):
 
         try:
             settings = self.get_settings()
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText("Estimated size: —")
             self.render_requested.emit(settings)
 
         except ValueError as error:
@@ -1744,6 +2359,8 @@ class SettingsPage(QWidget):
 
         try:
             settings = self.get_settings()
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText("Estimated size: —")
             self.queue_requested.emit(settings)
 
         except ValueError as error:

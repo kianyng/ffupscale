@@ -120,9 +120,15 @@ SUPPORTED_ENCODERS = set(ENCODER_PROFILES)
 # -- Target Size Calculation --
 
 TARGET_AUDIO_BITRATE = 128_000
+QUALITY_AUDIO_BITRATE = 192_000
 CONTAINER_OVERHEAD_RATIO = 0.02
 MINIMUM_VIDEO_BITRATE = 500_000
 TARGET_SIZE_SAFETY_RATIO = 0.97
+QUALITY_ESTIMATE_SCALE = 10
+QUALITY_ESTIMATE_REFERENCE = 30
+CRF_BITRATE_STEP = 6
+NVENC_HIGH_QUALITY_REFERENCE = 18
+NVENC_HIGH_QUALITY_BITRATE_STEP = 9.9
 # Approximate bits required for each output pixel per frame.
 #
 # CPU values represent a recommended quality floor. Hardware values
@@ -271,6 +277,72 @@ def calculate_recommended_target_size_mb(
     )
 
     return recommended_size_mb
+
+
+def calculate_estimated_quality_size_mb(
+    duration,
+    width,
+    height,
+    fps,
+    encoder,
+    quality,
+):
+    """Estimate output size from quality settings using a CRF bitrate heuristic."""
+
+    if (
+        duration is None
+        or duration <= 0
+        or fps is None
+        or fps <= 0
+        or width <= 0
+        or height <= 0
+    ):
+        return None
+
+    recommended_bits_per_pixel = RECOMMENDED_BITS_PER_PIXEL.get(encoder)
+
+    if recommended_bits_per_pixel is None:
+        return None
+
+    if (
+        encoder == "h264_nvenc"
+        and quality > NVENC_HIGH_QUALITY_REFERENCE
+    ):
+        quality_multiplier = 2 ** (
+            (
+                NVENC_HIGH_QUALITY_REFERENCE
+                - QUALITY_ESTIMATE_REFERENCE
+            )
+            / CRF_BITRATE_STEP
+        ) * 2 ** (
+            (quality - NVENC_HIGH_QUALITY_REFERENCE)
+            / NVENC_HIGH_QUALITY_BITRATE_STEP
+        )
+
+    else:
+        quality_multiplier = 2 ** (
+            (quality - QUALITY_ESTIMATE_REFERENCE)
+            / CRF_BITRATE_STEP
+        )
+
+    estimated_video_bitrate = max(
+        1,
+        int(
+            width
+            * height
+            * fps
+            * recommended_bits_per_pixel
+            * quality_multiplier
+        ),
+    )
+
+    return QUALITY_ESTIMATE_SCALE * (
+        (estimated_video_bitrate + QUALITY_AUDIO_BITRATE)
+        * duration
+        / 8
+        / 1_000_000
+        / (1 - CONTAINER_OVERHEAD_RATIO)
+    )
 
 
 def calculate_target_video_bitrate(
@@ -534,6 +606,7 @@ def build_upscale_command(
     trim_start=0.0,
     trim_end=None,
     merge_audio_tracks=False,
+    audio_stream_codecs=None,
 ):
     """
     Validate the settings and build an FFmpeg command.
@@ -646,7 +719,8 @@ def build_upscale_command(
         video_bitrate=video_bitrate,
     )
 
-    audio_stream_codecs = get_audio_stream_codecs(input_path)
+    if audio_stream_codecs is None:
+        audio_stream_codecs = get_audio_stream_codecs(input_path)
 
     if rate_control == "target_size":
         # A known audio bitrate makes the final size more predictable.
