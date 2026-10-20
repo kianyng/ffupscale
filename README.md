@@ -77,6 +77,8 @@ installation or system `PATH` configuration is required.
 - Automatic detection of usable CPU and GPU encoders
 - NVIDIA NVENC, AMD AMF and Intel Quick Sync support
 - Adjustable encoding quality and speed
+- Preservation of all audio tracks, with AAC audio copied without re-encoding
+- Optional mixing of all audio tracks into a single track
 - Target file size compression
 - Custom output folder and filename
 - Sequential render queue
@@ -126,11 +128,11 @@ ffupscale always provides software H.264 and H.265 encoding.
 When the application starts, it also checks whether the computer has a usable
 hardware encoder. Supported FFmpeg encoders include:
 
-| Hardware | H.264 | H.265 |
-| --- | --- | --- |
-| NVIDIA | NVENC | NVENC |
-| AMD | AMF | AMF |
-| Intel | Quick Sync | Quick Sync |
+| Hardware | H.264      | H.265      |
+| -------- | ---------- | ---------- |
+| NVIDIA   | NVENC      | NVENC      |
+| AMD      | AMF        | AMF        |
+| Intel    | Quick Sync | Quick Sync |
 
 A compatible GPU, current graphics driver and supported FFmpeg build are
 required. If hardware encoding is unavailable, CPU encoding remains available.

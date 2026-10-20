@@ -39,6 +39,7 @@ class RenderJob:
     source_fps: float
     trim_start: float = 0.0
     trim_end: float | None = None
+    merge_audio_tracks: bool = False
 
     job_id: str = field(default_factory=lambda: uuid4().hex)
     status: RenderStatus = RenderStatus.WAITING
@@ -124,6 +125,10 @@ class RenderJob:
             source_fps=source_fps,
             trim_start=trim_start,
             trim_end=trim_end,
+            merge_audio_tracks=settings.get(
+                "merge_audio_tracks",
+                False,
+            ),
         )
 
     # -- Display Helpers --

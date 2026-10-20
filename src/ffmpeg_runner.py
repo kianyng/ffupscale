@@ -1,6 +1,12 @@
+import json
+import subprocess
 from pathlib import Path
 
-from ffmpeg_manager import find_ffmpeg
+from ffmpeg_manager import (
+    find_ffmpeg,
+    find_ffprobe,
+    hidden_process_flags,
+)
 
 # -- Shared Encoding Speeds --
 
@@ -478,6 +484,40 @@ def build_video_encoder_arguments(
 # -- FFmpeg Command --
 
 
+def get_audio_stream_codecs(input_path):
+    """Return the codec name for each audio stream in the input."""
+
+    ffprobe_path = find_ffprobe()
+
+    result = subprocess.run(
+        [
+            ffprobe_path,
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "json",
+            str(input_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+        creationflags=hidden_process_flags(),
+    )
+
+    probe_data = json.loads(result.stdout)
+
+    return [
+        stream.get("codec_name")
+        for stream in probe_data.get("streams", [])
+    ]
+
+
 def build_upscale_command(
     input_path,
     output_path,
@@ -493,6 +533,7 @@ def build_upscale_command(
     source_fps=None,
     trim_start=0.0,
     trim_end=None,
+    merge_audio_tracks=False,
 ):
     """
     Validate the settings and build an FFmpeg command.
@@ -605,6 +646,8 @@ def build_upscale_command(
         video_bitrate=video_bitrate,
     )
 
+    audio_stream_codecs = get_audio_stream_codecs(input_path)
+
     if rate_control == "target_size":
         # A known audio bitrate makes the final size more predictable.
         audio_arguments = [
@@ -625,6 +668,18 @@ def build_upscale_command(
             "-b:a",
             "192k",
         ]
+
+    # Copy AAC streams to retain their original bitrate and avoid
+    # unnecessary lossy re-encoding. Other formats are converted to AAC
+    # for compatibility with the MP4 output.
+    for audio_index, codec in enumerate(audio_stream_codecs):
+        if not merge_audio_tracks and codec == "aac":
+            audio_arguments.extend(
+                [
+                    f"-c:a:{audio_index}",
+                    "copy",
+                ]
+            )
 
     # Seeking before the input lets FFmpeg reach the selected
     # starting position efficiently. Because the video is then
@@ -662,11 +717,6 @@ def build_upscale_command(
         "-n",
         # Input and optional trim range
         *input_arguments,
-        # First video stream and optional audio stream
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a:0?",
         # Upscaling
         "-vf",
         f"scale={width}:{height}:flags=lanczos",
@@ -675,13 +725,55 @@ def build_upscale_command(
         # Broad playback compatibility
         "-pix_fmt",
         "yuv420p",
+    ]
+
+    if merge_audio_tracks and len(audio_stream_codecs) > 1:
+        # Mix every input audio stream into one AAC track.
+        audio_filter = (
+            "".join(
+                f"[0:a:{audio_index}]"
+                for audio_index in range(len(audio_stream_codecs))
+            )
+            + (
+                f"amix=inputs={len(audio_stream_codecs)}:"
+                "duration=longest[aout]"
+            )
+        )
+
+        arguments.extend(
+            [
+                "-filter_complex",
+                audio_filter,
+                "-map",
+                "0:v:0",
+                "-map",
+                "[aout]",
+            ]
+        )
+
+        # Mixing requires encoding the combined audio stream.
+        arguments.extend(audio_arguments)
+
+    else:
         # Copy audio in quality mode or use a predictable bitrate
         # when targeting a file size.
-        *audio_arguments,
-        # Make MP4 begin playback sooner when streamed
-        "-movflags",
-        "+faststart",
-    ]
+        arguments.extend(
+            [
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a?",
+                *audio_arguments,
+            ]
+        )
+
+    arguments.extend(
+        [
+            # Make MP4 begin playback sooner when streamed
+            "-movflags",
+            "+faststart",
+        ]
+    )
 
     # hvc1 improves H.265 recognition in Apple players and devices.
     if ENCODER_PROFILES[encoder]["codec"] == "h265":

@@ -1095,6 +1095,7 @@ class MainWindow(QMainWindow):
                 source_fps=job.source_fps,
                 trim_start=job.trim_start,
                 trim_end=job.trim_end,
+                merge_audio_tracks=job.merge_audio_tracks,
             )
 
             self.current_job = job

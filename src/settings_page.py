@@ -596,6 +596,16 @@ class SettingsPage(QWidget):
         self.output_folder_edit.textChanged.connect(self.update_output_path_preview)
         self.output_filename_edit.textChanged.connect(self.update_output_path_preview)
 
+        # -- Advanced Settings --
+
+        self.merge_audio_tracks_checkbox = QCheckBox(
+            "Merge all audio tracks into one"
+        )
+        self.merge_audio_tracks_checkbox.setToolTip(
+            "Mixes all audio tracks together into one track, which can help "
+            "when sharing the video on platforms that play only one track."
+        )
+
         # -- Settings Form --
 
         settings_form = QFormLayout()
@@ -732,6 +742,16 @@ class SettingsPage(QWidget):
         settings_form.addRow(
             "Output path:",
             self.output_path_preview,
+        )
+
+        advanced_heading = QLabel("Advanced")
+        advanced_heading.setStyleSheet("""
+            font-weight: bold;
+        """)
+
+        settings_form.addRow(
+            advanced_heading,
+            self.merge_audio_tracks_checkbox,
         )
 
         # Put the settings form inside its own widget so QScrollArea can
@@ -1691,6 +1711,9 @@ class SettingsPage(QWidget):
             "output_path": self.get_output_path(),
             "trim_start": trim_start,
             "trim_end": trim_end,
+            "merge_audio_tracks": (
+                self.merge_audio_tracks_checkbox.isChecked()
+            ),
         }
 
     # -- Render Requests and Progress --
