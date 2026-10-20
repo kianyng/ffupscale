@@ -1,7 +1,11 @@
+import subprocess
+import tempfile
+import threading
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QThread, QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -20,9 +24,252 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ffmpeg_manager import hidden_process_flags
 from ffmpeg_runner import (
+    calculate_estimated_quality_size_mb,
     calculate_minimum_target_size_mb,
+    calculate_recommended_target_size_mb,
+    build_upscale_command,
+    get_audio_stream_codecs,
 )
+
+
+QUALITY_ESTIMATE_SAMPLE_DURATION = 1.0
+QUALITY_ESTIMATE_MAX_SAMPLED_DURATION = 3.0
+
+
+def format_video_duration(duration_seconds):
+    """Format a duration as hours, minutes, and seconds."""
+
+    total_seconds = round(duration_seconds)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+
+    if hours > 0:
+        return f"{hours}:{minutes:02}:{seconds:02}"
+
+    return f"{minutes}:{seconds:02}"
+
+
+class QualityEstimateWorker(QThread):
+    """Estimate output size by encoding short video samples in the background."""
+
+    estimate_ready = pyqtSignal(int, object, int, float)
+    estimate_failed = pyqtSignal(int, object, str)
+
+    def __init__(
+        self,
+        generation,
+        estimate_key,
+        settings,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.generation = generation
+        self.estimate_key = estimate_key
+        self.settings = settings
+        self.cancel_requested = threading.Event()
+        self.process_lock = threading.Lock()
+        self.active_process = None
+
+    def cancel(self):
+        """Request cancellation and stop the currently running FFmpeg process."""
+
+        self.cancel_requested.set()
+
+        with self.process_lock:
+            process = self.active_process
+
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+
+            except ProcessLookupError:
+                pass
+
+    def run(self):
+        try:
+            estimated_size = self.estimate_output_size()
+
+        except (
+            OSError,
+            ValueError,
+            subprocess.SubprocessError,
+        ) as error:
+            if not self.cancel_requested.is_set():
+                self.estimate_failed.emit(
+                    self.generation,
+                    self.estimate_key,
+                    str(error),
+                )
+
+        else:
+            if (
+                estimated_size is not None
+                and not self.cancel_requested.is_set()
+            ):
+                self.estimate_ready.emit(
+                    self.generation,
+                    self.estimate_key,
+                    self.settings["quality"],
+                    estimated_size,
+                )
+
+    def estimate_output_size(self):
+        """Encode up to three representative segments and extrapolate their size."""
+
+        settings = self.settings
+        duration = settings["trim_end"] - settings["trim_start"]
+
+        if duration <= 0:
+            raise ValueError("The selected video range has no duration.")
+
+        if duration <= QUALITY_ESTIMATE_MAX_SAMPLED_DURATION:
+            sample_ranges = [
+                (
+                    settings["trim_start"],
+                    settings["trim_end"],
+                )
+            ]
+
+        else:
+            sample_duration = QUALITY_ESTIMATE_SAMPLE_DURATION
+            start_offsets = (
+                0.0,
+                (duration - sample_duration) / 2,
+                duration - sample_duration,
+            )
+            sample_ranges = [
+                (
+                    settings["trim_start"] + offset,
+                    settings["trim_start"] + offset + sample_duration,
+                )
+                for offset in start_offsets
+            ]
+
+        input_path = settings["input_path"]
+        audio_stream_codecs = get_audio_stream_codecs(input_path)
+
+        sampled_bytes = 0
+        sampled_duration = 0.0
+
+        with tempfile.TemporaryDirectory(
+            prefix="ffupscale-estimate-"
+        ) as temporary_directory:
+            temporary_path = Path(temporary_directory)
+
+            for index, (sample_start, sample_end) in enumerate(sample_ranges):
+                if self.cancel_requested.is_set():
+                    return None
+
+                sample_duration = sample_end - sample_start
+                output_path = temporary_path / f"sample_{index}.mp4"
+
+                ffmpeg_path, arguments = build_upscale_command(
+                    input_path=input_path,
+                    output_path=output_path,
+                    width=settings["width"],
+                    height=settings["height"],
+                    quality=settings["quality"],
+                    fps=settings["fps"],
+                    encoder=settings["encoder"],
+                    preset=settings["preset"],
+                    rate_control="quality",
+                    duration=settings["source_duration"],
+                    source_fps=settings["source_fps"],
+                    trim_start=sample_start,
+                    trim_end=sample_end,
+                    merge_audio_tracks=settings["merge_audio_tracks"],
+                    audio_stream_codecs=audio_stream_codecs,
+                )
+
+                arguments[0:0] = ["-v", "error"]
+                if self.cancel_requested.is_set():
+                    return None
+
+                error_log_path = (
+                    temporary_path / f"sample_{index}.log"
+                )
+
+                with error_log_path.open("wb") as error_log:
+                    process = subprocess.Popen(
+                        [ffmpeg_path, *arguments],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=error_log,
+                        creationflags=(
+                            hidden_process_flags()
+                            | getattr(
+                                subprocess,
+                                "BELOW_NORMAL_PRIORITY_CLASS",
+                                0,
+                            )
+                        ),
+                    )
+
+                    with self.process_lock:
+                        self.active_process = process
+                        cancelled = self.cancel_requested.is_set()
+
+                    if cancelled:
+                        self._terminate_process(process)
+
+                    while not cancelled and process.poll() is None:
+                        if self.cancel_requested.wait(0.1):
+                            self._terminate_process(process)
+                            cancelled = True
+
+                    with self.process_lock:
+                        if self.active_process is process:
+                            self.active_process = None
+
+                    if cancelled:
+                        return None
+
+                error_output = error_log_path.read_text(
+                    encoding="utf-8",
+                    errors="replace",
+                )
+
+                if process.returncode != 0:
+                    raise ValueError(
+                        "FFmpeg could not estimate the output size."
+                        + (
+                            f"\n\n{error_output.strip()}"
+                            if error_output.strip()
+                            else ""
+                        )
+                    )
+
+                sampled_bytes += output_path.stat().st_size
+                sampled_duration += sample_duration
+
+        return (
+            sampled_bytes
+            / sampled_duration
+            * duration
+            / 1_000_000
+        )
+
+    @staticmethod
+    def _terminate_process(process):
+        """Stop a sample encode promptly when it is cancelled."""
+
+        if process.poll() is None:
+            try:
+                process.terminate()
+
+            except ProcessLookupError:
+                pass
+
+        try:
+            process.wait(timeout=1.0)
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
 
 # -- Settings Page --
 
@@ -48,15 +295,89 @@ class SettingsPage(QWidget):
         self.source_fps = None
         self.source_width = None
         self.source_height = None
+        self.quality_estimate_generation = 0
+        self.quality_estimate_worker = None
+        self.pending_quality_estimate = None
+        self.current_quality_estimate_key = None
+        self.quality_estimate_cache = {}
+
+        self.quality_estimate_timer = QTimer(self)
+        self.quality_estimate_timer.setSingleShot(True)
+        self.quality_estimate_timer.setInterval(400)
+        self.quality_estimate_timer.timeout.connect(
+            self.start_quality_estimate
+        )
+
+        application = QApplication.instance()
+
+        if application is not None:
+            application.aboutToQuit.connect(
+                self.shutdown_quality_estimate
+            )
 
         # -- Page Header --
 
-        title = QLabel("Upscale settings")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title = QLabel("Settings")
+        title.setAlignment(
+            Qt.AlignmentFlag.AlignLeft
+            | Qt.AlignmentFlag.AlignVCenter
+        )
         title.setStyleSheet("""
             font-size: 32px;
             font-weight: bold;
         """)
+
+        self.video_thumbnail = QLabel("No preview")
+        self.video_thumbnail.setFixedSize(160, 91)
+        self.video_thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_thumbnail.setStyleSheet("""
+            background-color: #242424;
+            border-radius: 10px;
+            color: #999999;
+            font-size: 11px;
+        """)
+
+        self.video_resolution = QLabel("—")
+        self.video_duration_label = QLabel("—")
+        self.video_fps = QLabel("—")
+        self.video_file_size = QLabel("—")
+
+        video_metadata_layout = QHBoxLayout()
+        video_metadata_layout.setContentsMargins(0, 0, 0, 0)
+        video_metadata_layout.setSpacing(20)
+
+        for label, value in (
+            ("Resolution", self.video_resolution),
+            ("Duration", self.video_duration_label),
+            ("FPS", self.video_fps),
+            ("File size", self.video_file_size),
+        ):
+            metadata_item = QVBoxLayout()
+            metadata_item.setContentsMargins(0, 0, 0, 0)
+            metadata_item.setSpacing(2)
+
+            caption = QLabel(label)
+            caption.setStyleSheet("""
+                color: #999999;
+                font-size: 11px;
+            """)
+            value.setStyleSheet("""
+                font-size: 13px;
+                font-weight: bold;
+            """)
+
+            metadata_item.addWidget(caption)
+            metadata_item.addWidget(value)
+            video_metadata_layout.addLayout(metadata_item)
+
+        video_summary_layout = QVBoxLayout()
+        video_summary_layout.setContentsMargins(0, 0, 0, 8)
+        video_summary_layout.setSpacing(4)
+        video_summary_layout.addWidget(title)
+        video_summary_layout.addLayout(video_metadata_layout)
+
+        video_summary_widget = QWidget()
+        video_summary_widget.setLayout(video_summary_layout)
 
         self.view_queue_button = QPushButton("View queue")
 
@@ -72,11 +393,6 @@ class SettingsPage(QWidget):
 
         self.view_queue_button.clicked.connect(self.view_queue_requested.emit)
 
-        # A matching spacer keeps the title centred in the page,
-        # rather than centred only in the remaining space.
-        header_spacer = QWidget()
-        header_spacer.setFixedWidth(self.view_queue_button.width())
-
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(
             0,
@@ -84,19 +400,101 @@ class SettingsPage(QWidget):
             0,
             0,
         )
-        header_layout.setSpacing(10)
-
-        header_layout.addWidget(header_spacer)
-
+        header_layout.setSpacing(8)
+        header_layout.addWidget(self.video_thumbnail)
         header_layout.addWidget(
-            title,
+            video_summary_widget,
             stretch=1,
+            alignment=Qt.AlignmentFlag.AlignVCenter,
         )
 
-        header_layout.addWidget(self.view_queue_button)
+        header_layout.addWidget(
+            self.view_queue_button,
+            alignment=Qt.AlignmentFlag.AlignVCenter,
+        )
 
         self.video_name = QLabel("No video selected")
-        self.video_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_name.setAlignment(
+            Qt.AlignmentFlag.AlignLeft
+            | Qt.AlignmentFlag.AlignVCenter
+        )
+
+        header_section_layout = QVBoxLayout()
+        header_section_layout.setContentsMargins(0, 0, 0, 0)
+        header_section_layout.setSpacing(10)
+        header_section_layout.addLayout(header_layout)
+        header_section_layout.addWidget(self.video_name)
+
+        # -- Trim Range --
+
+        self.trim_checkbox = QCheckBox(
+            "Render only part of the video"
+        )
+
+        self.trim_start_box = QDoubleSpinBox()
+        self.trim_start_box.setRange(
+            0.0,
+            86_400.0,
+        )
+        self.trim_start_box.setDecimals(3)
+        self.trim_start_box.setSingleStep(0.1)
+        self.trim_start_box.setSuffix(" s")
+        self.trim_start_box.setToolTip(
+            "Position where the exported clip begins."
+        )
+
+        self.trim_end_box = QDoubleSpinBox()
+        self.trim_end_box.setRange(
+            0.0,
+            86_400.0,
+        )
+        self.trim_end_box.setDecimals(3)
+        self.trim_end_box.setSingleStep(0.1)
+        self.trim_end_box.setSuffix(" s")
+        self.trim_end_box.setToolTip(
+            "Position where the exported clip ends."
+        )
+
+        self.trim_duration_label = QLabel(
+            "Selected duration: —"
+        )
+
+        self.trim_duration_label.setStyleSheet("""
+            color: #999999;
+            font-size: 11px;
+        """)
+
+        self.reset_trim_button = QPushButton(
+            "Reset to full video"
+        )
+
+        self.reset_trim_button.clicked.connect(
+            self.reset_trim_range
+        )
+
+        self.trim_checkbox.toggled.connect(
+            self.update_trim_controls
+        )
+
+        self.trim_start_box.valueChanged.connect(
+            self.update_trim_summary
+        )
+
+        self.trim_end_box.valueChanged.connect(
+            self.update_trim_summary
+        )
+
+        self.trim_start_box.valueChanged.connect(
+            self.update_automatic_recommendation
+        )
+
+        self.trim_end_box.valueChanged.connect(
+            self.update_automatic_recommendation
+        )
+
+        self.trim_checkbox.toggled.connect(
+            self.update_automatic_recommendation
+        )
 
         # -- Resolution Settings --
 
@@ -145,9 +543,9 @@ class SettingsPage(QWidget):
         self.custom_height.setSuffix(" px")
         self.custom_height.setSingleStep(2)
 
-        self.custom_width.valueChanged.connect(self.update_minimum_target_size)
+        self.custom_width.valueChanged.connect(self.update_target_size_estimate)
 
-        self.custom_height.valueChanged.connect(self.update_minimum_target_size)
+        self.custom_height.valueChanged.connect(self.update_target_size_estimate)
 
         custom_resolution_layout = QHBoxLayout()
         custom_resolution_layout.setContentsMargins(0, 0, 0, 0)
@@ -213,9 +611,42 @@ class SettingsPage(QWidget):
 
         self.fps_box.currentIndexChanged.connect(self.update_custom_fps_visibility)
 
-        self.fps_box.currentIndexChanged.connect(self.update_minimum_target_size)
+        self.fps_box.currentIndexChanged.connect(self.update_target_size_estimate)
 
-        self.custom_fps.valueChanged.connect(self.update_minimum_target_size)
+        self.custom_fps.valueChanged.connect(self.update_target_size_estimate)
+
+        self.auto_resolution_checkbox = QCheckBox(
+            "Automatically choose resolution and frame rate"
+        )
+
+        self.auto_resolution_checkbox.setChecked(
+            True
+        )
+
+        self.auto_recommendation_label = QLabel(
+            "Select Target file size under Size control "
+            "to automatically choose settings."
+        )
+
+        self.auto_recommendation_label.setWordWrap(
+            True
+        )
+
+        self.auto_recommendation_label.setStyleSheet("""
+            color: #999999;
+            font-size: 11px;
+        """)
+
+        self.auto_resolution_checkbox.toggled.connect(
+            self.update_automatic_recommendation
+        )
+
+        self.auto_resolution_checkbox.toggled.connect(
+            self.update_auto_resolution_controls
+        )
+        self.auto_resolution_checkbox.toggled.connect(
+            self.update_target_size_estimate
+        )
 
         # -- Rate Control Settings --
 
@@ -233,6 +664,15 @@ class SettingsPage(QWidget):
 
         self.rate_control_box.currentIndexChanged.connect(
             self.update_rate_control_visibility
+        )
+        self.rate_control_box.currentIndexChanged.connect(
+            self.update_target_size_estimate
+        )
+        self.rate_control_box.currentIndexChanged.connect(
+            self.update_automatic_recommendation
+        )
+        self.rate_control_box.currentIndexChanged.connect(
+            self.update_auto_resolution_controls
         )
 
         # -- Quality Settings --
@@ -312,6 +752,16 @@ class SettingsPage(QWidget):
             font-size: 11px;
         """)
 
+        self.quality_size_label = QLabel("Estimated size: —")
+        self.quality_size_label.setStyleSheet("""
+            color: #999999;
+            font-size: 11px;
+        """)
+        self.quality_size_label.setToolTip(
+            "A rough estimate based on the selected codec, resolution, "
+            "frame rate and quality. Actual size varies with video content."
+        )
+
         quality_widget_layout = QVBoxLayout()
         quality_widget_layout.setContentsMargins(
             0,
@@ -321,6 +771,7 @@ class SettingsPage(QWidget):
         )
         quality_widget_layout.setSpacing(4)
         quality_widget_layout.addLayout(quality_controls_layout)
+        quality_widget_layout.addWidget(self.quality_size_label)
         quality_widget_layout.addWidget(quality_help)
 
         self.quality_widget = QWidget()
@@ -331,13 +782,15 @@ class SettingsPage(QWidget):
         self.target_size_box = QDoubleSpinBox()
         self.target_size_box.setRange(1.0, 100000.0)
         self.target_size_box.setValue(100.0)
-        self.target_size_box.setDecimals(1)
+        self.target_size_box.setDecimals(3)
         self.target_size_box.setSingleStep(10.0)
         self.target_size_box.setSuffix(" MB")
 
-        self.minimum_size_label = QLabel("Estimated minimum: —")
+        self.target_size_estimate_label = QLabel(
+            "Estimated size for recommended quality: —"
+        )
 
-        self.minimum_size_label.setStyleSheet("""
+        self.target_size_estimate_label.setStyleSheet("""
             color: #999999;
             font-size: 11px;
         """)
@@ -353,7 +806,7 @@ class SettingsPage(QWidget):
 
         target_size_layout.addWidget(self.target_size_box)
 
-        target_size_layout.addWidget(self.minimum_size_label)
+        target_size_layout.addWidget(self.target_size_estimate_label)
 
         target_size_layout.addStretch()
 
@@ -362,6 +815,9 @@ class SettingsPage(QWidget):
 
         self.target_size_box.setToolTip(
             "The finished file will be approximately this size."
+        )
+        self.target_size_box.valueChanged.connect(
+            self.update_automatic_recommendation
         )
 
         self.target_size_label = QLabel("Target size:")
@@ -387,7 +843,13 @@ class SettingsPage(QWidget):
 
         self.encoder_box = QComboBox()
 
-        self.encoder_box.currentIndexChanged.connect(self.update_minimum_target_size)
+        self.encoder_box.currentIndexChanged.connect(
+            self.update_target_size_estimate
+        )
+
+        self.encoder_box.currentIndexChanged.connect(
+            self.update_automatic_recommendation
+        )
 
         self.gpu_encoding_checkbox.toggled.connect(self.update_encoder_options)
 
@@ -412,6 +874,9 @@ class SettingsPage(QWidget):
         )
 
         self.preset_box.setCurrentIndex(1)
+        self.preset_box.currentIndexChanged.connect(
+            self.update_quality_size_estimate
+        )
 
         # -- Output Settings --
 
@@ -460,10 +925,66 @@ class SettingsPage(QWidget):
         self.output_folder_edit.textChanged.connect(self.update_output_path_preview)
         self.output_filename_edit.textChanged.connect(self.update_output_path_preview)
 
+        # -- Advanced Settings --
+
+        self.merge_audio_tracks_checkbox = QCheckBox(
+            "Merge all audio tracks into one"
+        )
+        self.merge_audio_tracks_checkbox.toggled.connect(
+            self.update_quality_size_estimate
+        )
+        self.merge_audio_tracks_checkbox.setToolTip(
+            "Mixes all audio tracks together into one track, which can help "
+            "when sharing the video on platforms that play only one track."
+        )
+
         # -- Settings Form --
 
         settings_form = QFormLayout()
         settings_form.setVerticalSpacing(20)
+        settings_form.addRow(
+            "Trim:",
+            self.trim_checkbox,
+        )
+
+        settings_form.addRow(
+            "Start:",
+            self.trim_start_box,
+        )
+
+        settings_form.addRow(
+            "End:",
+            self.trim_end_box,
+        )
+
+        trim_information_layout = QHBoxLayout()
+        trim_information_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
+        trim_information_layout.setSpacing(10)
+
+        trim_information_layout.addWidget(
+            self.trim_duration_label
+        )
+
+        trim_information_layout.addStretch()
+
+        trim_information_layout.addWidget(
+            self.reset_trim_button
+        )
+
+        self.trim_information_widget = QWidget()
+        self.trim_information_widget.setLayout(
+            trim_information_layout
+        )
+
+        settings_form.addRow(
+            "",
+            self.trim_information_widget,
+        )
         settings_form.addRow(
             "Resolution:",
             self.resolution_box,
@@ -478,7 +999,7 @@ class SettingsPage(QWidget):
             self.update_custom_resolution_visibility
         )
 
-        self.resolution_box.currentIndexChanged.connect(self.update_minimum_target_size)
+        self.resolution_box.currentIndexChanged.connect(self.update_target_size_estimate)
 
         settings_form.addRow(
             "Frame rate:",
@@ -488,6 +1009,16 @@ class SettingsPage(QWidget):
         settings_form.addRow(
             self.custom_fps_label,
             self.custom_fps,
+        )
+
+        settings_form.addRow(
+            "",
+            self.auto_resolution_checkbox,
+        )
+
+        settings_form.addRow(
+            "",
+            self.auto_recommendation_label,
         )
 
         settings_form.addRow(
@@ -538,6 +1069,16 @@ class SettingsPage(QWidget):
         settings_form.addRow(
             "Output path:",
             self.output_path_preview,
+        )
+
+        advanced_heading = QLabel("Advanced")
+        advanced_heading.setStyleSheet("""
+            font-weight: bold;
+        """)
+
+        settings_form.addRow(
+            advanced_heading,
+            self.merge_audio_tracks_checkbox,
         )
 
         # Put the settings form inside its own widget so QScrollArea can
@@ -619,7 +1160,7 @@ class SettingsPage(QWidget):
 
         self.back_button = QPushButton("Back")
 
-        self.back_button.clicked.connect(self.back_requested.emit)
+        self.back_button.clicked.connect(self.request_back)
 
         self.back_button.setStyleSheet("""
             QPushButton {
@@ -679,11 +1220,9 @@ class SettingsPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 20, 30, 30)
-        layout.setSpacing(20)
+        layout.setSpacing(10)
 
-        layout.addLayout(header_layout)
-
-        layout.addWidget(self.video_name)
+        layout.addLayout(header_section_layout)
 
         # The form expands into the available space and becomes scrollable
         # when the window is not tall enough.
@@ -698,7 +1237,9 @@ class SettingsPage(QWidget):
 
         self.update_custom_resolution_visibility()
         self.update_custom_fps_visibility()
+        self.update_auto_resolution_controls()
         self.update_rate_control_visibility()
+        self.update_trim_controls()
 
     # -- Video and Output Selection --
 
@@ -709,6 +1250,8 @@ class SettingsPage(QWidget):
         source_fps=None,
         source_width=None,
         source_height=None,
+        file_size=None,
+        thumbnail=None,
     ):
         """Display the input and suggest an output location."""
 
@@ -720,10 +1263,95 @@ class SettingsPage(QWidget):
 
         self.video_name.setText(new_input_path.name)
 
+        if thumbnail is not None and not thumbnail.isNull():
+            self.video_thumbnail.setPixmap(thumbnail)
+        else:
+            self.video_thumbnail.clear()
+            self.video_thumbnail.setText("No preview")
+
+        self.video_resolution.setText(
+            (
+                f"{source_width} × {source_height}"
+                if source_width is not None and source_height is not None
+                else "—"
+            )
+        )
+        self.video_duration_label.setText(
+            (
+                format_video_duration(duration)
+                if duration is not None
+                else "—"
+            )
+        )
+        self.video_fps.setText(
+            f"{source_fps:.2f} FPS"
+            if source_fps is not None
+            else "—"
+        )
+        self.video_file_size.setText(
+            f"{file_size / 1_000_000:.2f} MB"
+            if file_size is not None
+            else "—"
+        )
+
         self.video_duration = duration
         self.source_fps = source_fps
         self.source_width = source_width
         self.source_height = source_height
+
+        if file_size is not None and file_size > 0:
+            if file_size >= 1000:
+                self.target_size_box.setDecimals(3)
+                maximum_target_size_mb = (
+                    file_size // 1000 / 1000
+                )
+            else:
+                self.target_size_box.setDecimals(6)
+                maximum_target_size_mb = file_size / 1_000_000
+
+            self.target_size_box.setRange(
+                min(1.0, maximum_target_size_mb),
+                maximum_target_size_mb,
+            )
+            self.target_size_box.setToolTip(
+                "The finished file will be approximately this size. "
+                "The target cannot exceed the input file size."
+            )
+
+        else:
+            self.target_size_box.setRange(1.0, 100000.0)
+            self.target_size_box.setToolTip(
+                "The finished file will be approximately this size."
+            )
+
+        # QDoubleSpinBox displays milliseconds, so round down
+        # to avoid placing the end slightly beyond the source.
+        if duration is not None and duration > 0:
+            displayed_duration = (
+                int(float(duration) * 1000)
+                / 1000
+            )
+
+            self.trim_checkbox.setEnabled(True)
+
+            self.trim_start_box.setMaximum(
+                displayed_duration
+            )
+
+            self.trim_end_box.setMaximum(
+                displayed_duration
+            )
+
+            if video_changed:
+                self.trim_checkbox.setChecked(False)
+                self.trim_start_box.setValue(0.0)
+                self.trim_end_box.setValue(
+                    displayed_duration
+                )
+
+        else:
+            self.trim_checkbox.setEnabled(False)
+            self.trim_checkbox.setChecked(False)
 
         # Display the actual dimensions in the Same as source option.
         source_index = self.resolution_box.findData("source")
@@ -742,7 +1370,9 @@ class SettingsPage(QWidget):
             self.output_filename_edit.setText(f"{new_input_path.stem}_upscaled.mp4")
 
         self.update_output_path_preview()
-        self.update_minimum_target_size()
+        self.update_trim_controls()
+        self.update_target_size_estimate()
+        self.update_automatic_recommendation()
 
     def browse_output_folder(self):
         """Ask the user where the rendered video should be saved."""
@@ -816,13 +1446,158 @@ class SettingsPage(QWidget):
         if output_path.resolve() == self.input_path.resolve():
             raise ValueError("The output file cannot overwrite the input video.")
 
-        if output_path.exists():
-            raise ValueError(
-                "A file already exists at the selected output path. "
-                "Choose another filename."
+        return output_path
+
+
+    # -- Trim Range --
+
+    @staticmethod
+    def format_timecode(seconds):
+        """Format seconds as HH:MM:SS.mmm."""
+
+        total_milliseconds = round(
+            float(seconds) * 1000
+        )
+
+        total_seconds, milliseconds = divmod(
+            total_milliseconds,
+            1000,
+        )
+
+        hours, remainder = divmod(
+            total_seconds,
+            3600,
+        )
+
+        minutes, seconds = divmod(
+            remainder,
+            60,
+        )
+
+        return (
+            f"{hours:02d}:"
+            f"{minutes:02d}:"
+            f"{seconds:02d}."
+            f"{milliseconds:03d}"
+        )
+
+    def update_trim_controls(
+        self,
+        _checked=None,
+    ):
+        """Enable trim inputs only when trimming is selected."""
+
+        trim_enabled = (
+            self.trim_checkbox.isChecked()
+            and self.video_duration is not None
+        )
+
+        self.trim_start_box.setEnabled(
+            trim_enabled
+        )
+
+        self.trim_end_box.setEnabled(
+            trim_enabled
+        )
+
+        self.reset_trim_button.setEnabled(
+            trim_enabled
+        )
+
+        self.update_trim_summary()
+
+    def update_trim_summary(
+        self,
+        _value=None,
+    ):
+        """Display the duration of the selected range."""
+
+        if self.video_duration is None:
+            self.trim_duration_label.setText(
+                "Selected duration: —"
+            )
+            return
+
+        if self.trim_checkbox.isChecked():
+            selected_duration = (
+                self.trim_end_box.value()
+                - self.trim_start_box.value()
             )
 
-        return output_path
+        else:
+            selected_duration = (
+                self.video_duration
+            )
+
+        if selected_duration <= 0:
+            self.trim_duration_label.setText(
+                "Selected duration: invalid range"
+            )
+
+        else:
+            timecode = self.format_timecode(
+                selected_duration
+            )
+
+            self.trim_duration_label.setText(
+                f"Selected duration: {timecode}"
+            )
+
+        self.update_target_size_estimate()
+
+    def reset_trim_range(self):
+        """Select the complete source video."""
+
+        if self.video_duration is None:
+            return
+
+        displayed_duration = (
+            int(float(self.video_duration) * 1000)
+            / 1000
+        )
+
+        self.trim_start_box.setValue(0.0)
+
+        self.trim_end_box.setValue(
+            displayed_duration
+        )
+
+    def get_trim_range(self):
+        """Return and validate the selected trim range."""
+
+        if self.video_duration is None:
+            raise ValueError(
+                "The source video duration is unavailable."
+            )
+
+        if not self.trim_checkbox.isChecked():
+            return 0.0, None
+
+        trim_start = (
+            self.trim_start_box.value()
+        )
+
+        trim_end = (
+            self.trim_end_box.value()
+        )
+
+        if trim_start < 0:
+            raise ValueError(
+                "The trim start cannot be negative."
+            )
+
+        if trim_end <= trim_start:
+            raise ValueError(
+                "The trim end must be after the trim start."
+            )
+
+        if trim_end > self.video_duration:
+            raise ValueError(
+                "The trim end cannot exceed the video duration."
+            )
+
+        return trim_start, trim_end
+
 
     # -- Setting Values and Visibility --
 
@@ -855,27 +1630,340 @@ class SettingsPage(QWidget):
 
         self.custom_fps.setVisible(custom_selected)
 
+    def update_auto_resolution_controls(self):
+        """Disable manual resolution and frame-rate controls when automatic."""
+
+        target_size_selected = (
+            self.rate_control_box.currentData() == "target_size"
+        )
+        automatic_selection_active = (
+            self.auto_resolution_checkbox.isChecked()
+            and target_size_selected
+        )
+        manual_controls_enabled = not automatic_selection_active
+
+        self.auto_resolution_checkbox.setEnabled(target_size_selected)
+        self.resolution_box.setEnabled(manual_controls_enabled)
+        self.custom_resolution_label.setEnabled(manual_controls_enabled)
+        self.custom_resolution_widget.setEnabled(manual_controls_enabled)
+
+        self.fps_box.setEnabled(manual_controls_enabled)
+        self.custom_fps_label.setEnabled(manual_controls_enabled)
+        self.custom_fps.setEnabled(manual_controls_enabled)
+
+
+    def update_automatic_recommendation(
+        self,
+        _value=None,
+    ):
+        """Choose suitable resolution and FPS settings for the target size."""
+
+        if not self.auto_resolution_checkbox.isChecked():
+            self.auto_recommendation_label.setText(
+                "Automatic recommendations are disabled."
+            )
+            return
+
+        if self.rate_control_box.currentData() != "target_size":
+            self.auto_recommendation_label.setText(
+                "Select Target file size under Size control "
+                "to automatically choose settings."
+            )
+            return
+
+        target_size = self.target_size_box.value()
+
+        if (
+            self.video_duration is None
+            or self.source_width is None
+            or self.source_height is None
+            or self.source_fps is None
+        ):
+            self.auto_recommendation_label.setText(
+                "Import a video to calculate recommended settings."
+            )
+            return
+
+        try:
+            trim_start, trim_end = self.get_trim_range()
+
+        except ValueError:
+            self.auto_recommendation_label.setText(
+                "Select a valid trim range."
+            )
+            return
+
+        duration = (
+            trim_end - trim_start
+            if trim_end is not None
+            else self.video_duration
+        )
+
+        encoder = self.encoder_box.currentData()
+
+        # -- Resolution Candidates --
+
+        resolution_candidates = [
+            {
+                "data": "source",
+                "width": self.source_width,
+                "height": self.source_height,
+            }
+        ]
+
+        seen_resolutions = {
+            (
+                self.source_width,
+                self.source_height,
+            )
+        }
+
+        for index in range(
+            self.resolution_box.count()
+        ):
+            resolution = (
+                self.resolution_box.itemData(index)
+            )
+
+            if not isinstance(resolution, tuple):
+                continue
+
+            width, height = resolution
+
+            # Automatic presets should never upscale the source.
+            if (
+                width > self.source_width
+                or height > self.source_height
+            ):
+                continue
+
+            if resolution in seen_resolutions:
+                continue
+
+            seen_resolutions.add(resolution)
+
+            resolution_candidates.append({
+                "data": resolution,
+                "width": width,
+                "height": height,
+            })
+
+        # -- Frame Rate Candidates --
+
+        fps_candidates = [
+            {
+                "data": "original",
+                "fps": float(self.source_fps),
+            }
+        ]
+
+        seen_frame_rates = {
+            round(float(self.source_fps), 3)
+        }
+
+        for index in range(
+            self.fps_box.count()
+        ):
+            fps = self.fps_box.itemData(index)
+
+            if (
+                isinstance(fps, bool)
+                or not isinstance(fps, (int, float))
+            ):
+                continue
+
+            fps = float(fps)
+
+            # Automatic presets should never create extra frames.
+            if fps > self.source_fps:
+                continue
+
+            rounded_fps = round(fps, 3)
+
+            if rounded_fps in seen_frame_rates:
+                continue
+
+            seen_frame_rates.add(rounded_fps)
+
+            fps_candidates.append({
+                "data": self.fps_box.itemData(index),
+                "fps": fps,
+            })
+
+        # -- Evaluate Every Combination --
+
+        evaluated_candidates = []
+
+        for resolution in resolution_candidates:
+            for frame_rate in fps_candidates:
+                estimated_size = (
+                    calculate_recommended_target_size_mb(
+                        duration=duration,
+                        width=resolution["width"],
+                        height=resolution["height"],
+                        fps=frame_rate["fps"],
+                        encoder=encoder,
+                    )
+                )
+
+                if estimated_size is None:
+                    continue
+
+                evaluated_candidates.append({
+                    "resolution_data": resolution["data"],
+                    "width": resolution["width"],
+                    "height": resolution["height"],
+                    "fps_data": frame_rate["data"],
+                    "fps": frame_rate["fps"],
+                    "estimated_size": estimated_size,
+                })
+
+        if not evaluated_candidates:
+            self.auto_recommendation_label.setText(
+                "A recommendation is not available "
+                "for the selected encoder."
+            )
+            return
+
+        suitable_candidates = [
+            candidate
+            for candidate in evaluated_candidates
+            if (
+                candidate["estimated_size"] <= target_size
+            )
+        ]
+
+        recommendation_available = bool(
+            suitable_candidates
+        )
+
+        if suitable_candidates:
+            # Use as much of the target budget as possible, then favor
+            # higher frame rates and resolution.
+            recommended = max(
+                suitable_candidates,
+                key=lambda candidate: (
+                    candidate["estimated_size"],
+                    candidate["fps"],
+                    candidate["width"]
+                    * candidate["height"],
+                ),
+            )
+
+        else:
+            # No option fits the target; choose the closest estimate.
+            recommended = min(
+                evaluated_candidates,
+                key=lambda candidate: (
+                    candidate["estimated_size"],
+                    -candidate["fps"],
+                    candidate["width"]
+                    * candidate["height"],
+                ),
+            )
+
+        # -- Apply the Selected Combination --
+
+        resolution_index = (
+            self.resolution_box.findData(
+                recommended["resolution_data"]
+            )
+        )
+
+        fps_index = self.fps_box.findData(
+            recommended["fps_data"]
+        )
+
+        self.resolution_box.blockSignals(True)
+        self.fps_box.blockSignals(True)
+
+        try:
+            if resolution_index >= 0:
+                self.resolution_box.setCurrentIndex(
+                    resolution_index
+                )
+
+            if fps_index >= 0:
+                self.fps_box.setCurrentIndex(
+                    fps_index
+                )
+
+        finally:
+            self.resolution_box.blockSignals(False)
+            self.fps_box.blockSignals(False)
+
+        self.update_custom_resolution_visibility()
+        self.update_custom_fps_visibility()
+        self.update_target_size_estimate()
+
+        width = recommended["width"]
+        height = recommended["height"]
+        fps = recommended["fps"]
+        estimated_size = recommended["estimated_size"]
+
+        if recommendation_available:
+            self.auto_recommendation_label.setText(
+                f"Recommended: {width} × {height} at "
+                f"{fps:g} FPS"
+            )
+
+        else:
+            self.auto_recommendation_label.setText(
+                f"The {target_size:g} MB target is below the "
+                f"estimated size for recommended quality "
+                f"({estimated_size:.2f} MB) at the least demanding "
+                f"available setting: {width} × {height} at "
+                f"{fps:g} FPS."
+            )
+
+
     def update_quality_display(self, value):
         """Display the currently selected CRF value."""
 
         self.quality_value.setText(str(value))
+        self.update_quality_size_estimate()
 
-    def update_minimum_target_size(
+    def update_target_size_estimate(
         self,
         _value=None,
     ):
-        """Update the estimated minimum for the current settings."""
+        """Update the appropriate size estimate for current settings."""
+
+        self.update_quality_size_estimate()
+
+        automatic_selection = (
+            self.auto_resolution_checkbox.isChecked()
+        )
+        if automatic_selection:
+            estimate_function = calculate_recommended_target_size_mb
+            estimate_label = "Estimated size for recommended quality"
+        else:
+            estimate_function = calculate_minimum_target_size_mb
+            estimate_label = "Estimated minimum"
 
         if self.video_duration is None or self.source_fps is None:
-            self.minimum_size_label.setText("Estimated minimum: —")
+            self.target_size_estimate_label.setText(
+                f"{estimate_label}: —"
+            )
             return
 
         try:
             width, height = self.get_resolution()
+            trim_start, trim_end = (
+                self.get_trim_range()
+            )
 
         except ValueError:
-            self.minimum_size_label.setText("Estimated minimum: —")
+            self.target_size_estimate_label.setText(
+                f"{estimate_label}: —"
+            )
             return
+
+        effective_duration = (
+            trim_end - trim_start
+            if trim_end is not None
+            else self.video_duration
+        )
 
         selected_fps = self.get_fps()
 
@@ -883,42 +1971,378 @@ class SettingsPage(QWidget):
 
         encoder = self.encoder_box.currentData()
 
-        minimum_size = calculate_minimum_target_size_mb(
-            duration=self.video_duration,
+        estimated_size = estimate_function(
+            duration=effective_duration,
             width=width,
             height=height,
             fps=effective_fps,
             encoder=encoder,
         )
 
-        if minimum_size is None:
-            self.minimum_size_label.setText("Estimated minimum: not available")
+        if estimated_size is None:
+            self.target_size_estimate_label.setText(
+                f"{estimate_label}: not available"
+            )
             return
 
-        if encoder in {
-            "libx264",
-            "libx265",
-        }:
-            label_text = f"Recommended minimum: {minimum_size:.1f} MB"
+        self.target_size_estimate_label.setText(
+            f"{estimate_label}: {estimated_size:.2f} MB"
+        )
 
-        elif encoder in {
-            "h264_amf",
-            "hevc_amf",
-            "h264_qsv",
-            "hevc_qsv",
-        }:
-            label_text = f"Estimated minimum: {minimum_size:.1f} MB*"
+        if automatic_selection:
+            tooltip = (
+                "This uses the same quality-oriented estimate as automatic "
+                "resolution and frame-rate selection. Actual file size and "
+                "quality depend on the video content. An encoder's technical "
+                "bitrate limit, when enforced, is checked separately at render."
+            )
+        else:
+            tooltip = (
+                "This is an estimated practical minimum for the selected "
+                "resolution, frame rate and encoder. Actual requirements "
+                "depend on video content. Enforced encoder limits are "
+                "checked separately at render."
+            )
+        self.target_size_estimate_label.setToolTip(tooltip)
+
+    def update_quality_size_estimate(self):
+        """Show a cached estimate or queue a background sample encode."""
+
+        self.quality_estimate_timer.stop()
+
+        if self.rate_control_box.currentData() != "quality":
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText("Estimated size: —")
+            return
+
+        if (
+            self.input_path is None
+            or self.video_duration is None
+            or self.source_fps is None
+        ):
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText("Estimated size: —")
+            return
+
+        try:
+            width, height = self.get_resolution()
+            trim_start, trim_end = self.get_trim_range()
+
+        except ValueError:
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText("Estimated size: —")
+            return
+
+        selected_end = (
+            trim_end
+            if trim_end is not None
+            else self.video_duration
+        )
+        selected_duration = selected_end - trim_start
+
+        if selected_duration <= 0:
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText(
+                "Estimated size: unavailable"
+            )
+            return
+
+        encoder = self.encoder_box.currentData()
+        preset = self.preset_box.currentData()
+        selected_fps = self.get_fps()
+        estimate_key = (
+            str(self.input_path),
+            self.video_duration,
+            self.source_fps,
+            trim_start,
+            selected_end,
+            width,
+            height,
+            selected_fps,
+            encoder,
+            preset,
+            self.merge_audio_tracks_checkbox.isChecked(),
+        )
+        settings = {
+            "input_path": str(self.input_path),
+            "source_duration": self.video_duration,
+            "source_fps": self.source_fps,
+            "trim_start": trim_start,
+            "trim_end": selected_end,
+            "width": width,
+            "height": height,
+            "quality": self.quality_slider.value(),
+            "fps": selected_fps,
+            "encoder": encoder,
+            "preset": preset,
+            "merge_audio_tracks": (
+                self.merge_audio_tracks_checkbox.isChecked()
+            ),
+        }
+        self.current_quality_estimate_key = estimate_key
+
+        cached_estimate = self.quality_estimate_cache.get(
+            estimate_key
+        )
+
+        if cached_estimate is not None:
+            self._cancel_worker_for_different_estimate(estimate_key)
+            self.pending_quality_estimate = None
+            self.quality_size_label.setToolTip(
+                "Estimated by encoding short samples from this video. "
+                "Actual size may vary with scenes not sampled."
+            )
+            self._display_calibrated_quality_estimate(
+                cached_estimate[0],
+                cached_estimate[1],
+                selected_duration,
+                width,
+                height,
+                encoder,
+            )
+            return
+
+        worker = self.quality_estimate_worker
+
+        if (
+            worker is not None
+            and worker.estimate_key == estimate_key
+            and not worker.cancel_requested.is_set()
+        ):
+            self.pending_quality_estimate = None
+            self.quality_size_label.setText(
+                "Estimated size: estimating..."
+            )
+            return
+
+        self._cancel_worker_for_different_estimate(estimate_key)
+        self.pending_quality_estimate = (
+            estimate_key,
+            settings,
+        )
+        self.quality_size_label.setText(
+            "Estimated size: estimating..."
+        )
+        self.quality_estimate_timer.start()
+
+    def _display_calibrated_quality_estimate(
+        self,
+        reference_size_mb,
+        reference_quality,
+        duration,
+        width,
+        height,
+        encoder,
+    ):
+        """Apply the cached sample calibration to the current slider value."""
+
+        effective_fps = self.get_fps()
+
+        if effective_fps is None:
+            effective_fps = self.source_fps
+
+        reference_model_size = calculate_estimated_quality_size_mb(
+            duration=duration,
+            width=width,
+            height=height,
+            fps=effective_fps,
+            encoder=encoder,
+            quality=reference_quality,
+        )
+        current_model_size = calculate_estimated_quality_size_mb(
+            duration=duration,
+            width=width,
+            height=height,
+            fps=effective_fps,
+            encoder=encoder,
+            quality=self.quality_slider.value(),
+        )
+
+        if (
+            reference_model_size is None
+            or current_model_size is None
+            or reference_model_size <= 0
+        ):
+            self.quality_size_label.setText(
+                "Estimated size: unavailable"
+            )
+            return
+
+        estimated_size = (
+            reference_size_mb
+            * current_model_size
+            / reference_model_size
+        )
+
+        if estimated_size >= 1000:
+            formatted_size = f"{estimated_size / 1000:.2f} GB"
 
         else:
-            label_text = f"Estimated minimum: {minimum_size:.1f} MB"
+            formatted_size = f"{estimated_size:.1f} MB"
 
-        self.minimum_size_label.setText(label_text)
-
-        self.minimum_size_label.setToolTip(
-            "This is an estimate based on the codec, resolution and "
-            "frame rate. Actual requirements depend on the video content. "
-            "AMD and Intel estimates are provisional."
+        self.quality_size_label.setText(
+            f"Estimated size: {formatted_size}"
         )
+
+    def _cancel_worker_for_different_estimate(self, estimate_key):
+        worker = self.quality_estimate_worker
+
+        if (
+            worker is not None
+            and worker.isRunning()
+            and worker.estimate_key != estimate_key
+        ):
+            self.quality_estimate_generation += 1
+            worker.cancel()
+
+    def start_quality_estimate(self):
+        """Start the newest queued estimate when no older worker is running."""
+
+        if self.quality_estimate_worker is not None:
+            if self.quality_estimate_worker.isRunning():
+                return
+
+            self.quality_estimate_worker.deleteLater()
+            self.quality_estimate_worker = None
+
+        if self.pending_quality_estimate is None:
+            return
+
+        estimate_key, settings = self.pending_quality_estimate
+        self.pending_quality_estimate = None
+        self.quality_estimate_generation += 1
+
+        worker = QualityEstimateWorker(
+            generation=self.quality_estimate_generation,
+            estimate_key=estimate_key,
+            settings=settings,
+            parent=self,
+        )
+        worker.estimate_ready.connect(
+            self.handle_quality_estimate_ready
+        )
+        worker.estimate_failed.connect(
+            self.handle_quality_estimate_failed
+        )
+        worker.finished.connect(
+            self.handle_quality_estimate_finished
+        )
+
+        self.quality_estimate_worker = worker
+        worker.start()
+
+    def handle_quality_estimate_ready(
+        self,
+        generation,
+        estimate_key,
+        reference_quality,
+        estimated_size,
+    ):
+        """Cache a sample result and display it if it is still current."""
+
+        self.quality_estimate_cache[estimate_key] = (
+            estimated_size,
+            reference_quality,
+        )
+
+        if len(self.quality_estimate_cache) > 8:
+            oldest_key = next(iter(self.quality_estimate_cache))
+            self.quality_estimate_cache.pop(oldest_key)
+
+        if (
+            generation != self.quality_estimate_generation
+            or estimate_key != self.current_quality_estimate_key
+        ):
+            return
+
+        try:
+            width, height = self.get_resolution()
+            trim_start, trim_end = self.get_trim_range()
+
+        except ValueError:
+            return
+
+        duration = (
+            trim_end - trim_start
+            if trim_end is not None
+            else self.video_duration - trim_start
+        )
+        self.quality_size_label.setToolTip(
+            "Estimated by encoding short samples from this video. "
+            "Actual size may vary with scenes not sampled."
+        )
+        self._display_calibrated_quality_estimate(
+            estimated_size,
+            reference_quality,
+            duration,
+            width,
+            height,
+            self.encoder_box.currentData(),
+        )
+
+    def handle_quality_estimate_failed(
+        self,
+        generation,
+        estimate_key,
+        error_message,
+    ):
+        """Report sample-encoding failures without blocking settings use."""
+
+        if (
+            generation != self.quality_estimate_generation
+            or estimate_key != self.current_quality_estimate_key
+        ):
+            return
+
+        self.quality_size_label.setText(
+            "Estimated size: unavailable"
+        )
+        self.quality_size_label.setToolTip(
+            f"Could not estimate output size:\n{error_message}"
+        )
+
+    def handle_quality_estimate_finished(self):
+        """Release a finished worker and start any newer pending estimate."""
+
+        worker = self.sender()
+
+        if worker is not self.quality_estimate_worker:
+            return
+
+        self.quality_estimate_worker = None
+        worker.deleteLater()
+
+        if (
+            self.pending_quality_estimate is not None
+            and not self.quality_estimate_timer.isActive()
+        ):
+            self.quality_estimate_timer.start(0)
+
+    def cancel_quality_estimate(self):
+        """Discard pending work and invalidate any result already in flight."""
+
+        self.quality_estimate_timer.stop()
+        self.pending_quality_estimate = None
+        self.current_quality_estimate_key = None
+        self.quality_estimate_generation += 1
+
+        if self.quality_estimate_worker is not None:
+            self.quality_estimate_worker.cancel()
+
+    def request_back(self):
+        """Stop background sampling before leaving the settings page."""
+
+        self.cancel_quality_estimate()
+        self.back_requested.emit()
+
+    def shutdown_quality_estimate(self):
+        """Stop and join the estimator before the application exits."""
+
+        self.cancel_quality_estimate()
+        worker = self.quality_estimate_worker
+
+        if worker is not None and worker.isRunning():
+            worker.wait()
 
     def get_fps(self):
         """Return None to preserve FPS, or the selected numeric value."""
@@ -964,6 +2388,10 @@ class SettingsPage(QWidget):
 
         width, height = self.get_resolution()
 
+        trim_start, trim_end = (
+            self.get_trim_range()
+        )
+
         rate_control = self.rate_control_box.currentData()
 
         target_size_mb = None
@@ -983,6 +2411,11 @@ class SettingsPage(QWidget):
             "encoder": self.encoder_box.currentData(),
             "preset": self.preset_box.currentData(),
             "output_path": self.get_output_path(),
+            "trim_start": trim_start,
+            "trim_end": trim_end,
+            "merge_audio_tracks": (
+                self.merge_audio_tracks_checkbox.isChecked()
+            ),
         }
 
     # -- Render Requests and Progress --
@@ -996,6 +2429,8 @@ class SettingsPage(QWidget):
 
         try:
             settings = self.get_settings()
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText("Estimated size: —")
             self.render_requested.emit(settings)
 
         except ValueError as error:
@@ -1013,6 +2448,8 @@ class SettingsPage(QWidget):
 
         try:
             settings = self.get_settings()
+            self.cancel_quality_estimate()
+            self.quality_size_label.setText("Estimated size: —")
             self.queue_requested.emit(settings)
 
         except ValueError as error:
@@ -1040,6 +2477,7 @@ class SettingsPage(QWidget):
         else:
             self.render_button.setText("Render")
             self.render_button.setEnabled(True)
+            self.progress_bar.setFormat("%p%")
 
     def set_cancelling(self):
         """Prevent repeated cancellation requests while FFmpeg is stopping."""
@@ -1047,11 +2485,18 @@ class SettingsPage(QWidget):
         self.render_button.setText("Cancelling...")
         self.render_button.setEnabled(False)
 
-    def set_progress(self, percentage):
-        """Clamp FFmpeg progress to the range accepted by QProgressBar."""
+    def set_progress(self, percentage, remaining_time_text=None):
+        """Update render progress and its estimated remaining time."""
 
         percentage = max(0, min(100, int(percentage)))
         self.progress_bar.setValue(percentage)
+        if self.is_rendering:
+            remaining_time_text = (
+                remaining_time_text or "Estimating remaining time..."
+            )
+            self.progress_bar.setFormat(
+                f"%p% · {remaining_time_text}"
+            )
 
     # -- Hardware Encoder Options --
 
@@ -1162,4 +2607,4 @@ class SettingsPage(QWidget):
                 break
 
         self.encoder_box.blockSignals(False)
-        self.update_minimum_target_size()
+        self.update_target_size_estimate()

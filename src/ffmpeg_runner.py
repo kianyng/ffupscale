@@ -1,6 +1,12 @@
+import json
+import subprocess
 from pathlib import Path
 
-from ffmpeg_manager import find_ffmpeg
+from ffmpeg_manager import (
+    find_ffmpeg,
+    find_ffprobe,
+    hidden_process_flags,
+)
 
 # -- Shared Encoding Speeds --
 
@@ -114,8 +120,15 @@ SUPPORTED_ENCODERS = set(ENCODER_PROFILES)
 # -- Target Size Calculation --
 
 TARGET_AUDIO_BITRATE = 128_000
+QUALITY_AUDIO_BITRATE = 192_000
 CONTAINER_OVERHEAD_RATIO = 0.02
 MINIMUM_VIDEO_BITRATE = 500_000
+TARGET_SIZE_SAFETY_RATIO = 0.97
+QUALITY_ESTIMATE_SCALE = 10
+QUALITY_ESTIMATE_REFERENCE = 30
+CRF_BITRATE_STEP = 6
+NVENC_HIGH_QUALITY_REFERENCE = 18
+NVENC_HIGH_QUALITY_BITRATE_STEP = 9.9
 # Approximate bits required for each output pixel per frame.
 #
 # CPU values represent a recommended quality floor. Hardware values
@@ -133,6 +146,30 @@ MINIMUM_BITS_PER_PIXEL = {
     # Intel Quick Sync — provisional until tested on Intel hardware
     "h264_qsv": 0.011,
     "hevc_qsv": 0.006,
+}
+
+
+# Approximate bitrate requirements for visually reasonable output.
+#
+# These are intentionally higher than MINIMUM_BITS_PER_PIXEL.
+# The minimum values describe encoder limits, while these values
+# are used when automatically recommending resolution and FPS.
+RECOMMENDED_BITS_PER_PIXEL = {
+    # CPU encoders
+    "libx264": 0.016,
+    "libx265": 0.010,
+
+    # NVIDIA NVENC
+    "h264_nvenc": 0.020,
+    "hevc_nvenc": 0.012,
+
+    # AMD AMF — provisional until tested on AMD hardware
+    "h264_amf": 0.020,
+    "hevc_amf": 0.012,
+
+    # Intel Quick Sync — provisional until tested on Intel hardware
+    "h264_qsv": 0.020,
+    "hevc_qsv": 0.012,
 }
 
 
@@ -185,6 +222,129 @@ def calculate_minimum_target_size_mb(
     return minimum_size_mb
 
 
+def calculate_recommended_target_size_mb(
+    duration,
+    width,
+    height,
+    fps,
+    encoder,
+):
+    """
+    Estimate a target size likely to provide reasonable visual quality.
+
+    This is used by automatic presets and does not prevent users from
+    manually selecting more aggressive compression settings.
+    """
+
+    if (
+        duration is None
+        or duration <= 0
+        or fps is None
+        or fps <= 0
+        or width <= 0
+        or height <= 0
+    ):
+        return None
+
+    bits_per_pixel = (
+        RECOMMENDED_BITS_PER_PIXEL.get(encoder)
+    )
+
+    if bits_per_pixel is None:
+        return None
+
+    recommended_video_bitrate = int(
+        width
+        * height
+        * fps
+        * bits_per_pixel
+    )
+
+    recommended_video_bitrate = max(
+        recommended_video_bitrate,
+        MINIMUM_VIDEO_BITRATE,
+    )
+
+    recommended_size_mb = (
+        (
+            recommended_video_bitrate
+            + TARGET_AUDIO_BITRATE
+        )
+        * duration
+        / 8
+        / 1_000_000
+        / (1 - CONTAINER_OVERHEAD_RATIO)
+    )
+
+    return recommended_size_mb
+
+
+def calculate_estimated_quality_size_mb(
+    duration,
+    width,
+    height,
+    fps,
+    encoder,
+    quality,
+):
+    """Estimate output size from quality settings using a CRF bitrate heuristic."""
+
+    if (
+        duration is None
+        or duration <= 0
+        or fps is None
+        or fps <= 0
+        or width <= 0
+        or height <= 0
+    ):
+        return None
+
+    recommended_bits_per_pixel = RECOMMENDED_BITS_PER_PIXEL.get(encoder)
+
+    if recommended_bits_per_pixel is None:
+        return None
+
+    if (
+        encoder == "h264_nvenc"
+        and quality > NVENC_HIGH_QUALITY_REFERENCE
+    ):
+        quality_multiplier = 2 ** (
+            (
+                NVENC_HIGH_QUALITY_REFERENCE
+                - QUALITY_ESTIMATE_REFERENCE
+            )
+            / CRF_BITRATE_STEP
+        ) * 2 ** (
+            (quality - NVENC_HIGH_QUALITY_REFERENCE)
+            / NVENC_HIGH_QUALITY_BITRATE_STEP
+        )
+
+    else:
+        quality_multiplier = 2 ** (
+            (quality - QUALITY_ESTIMATE_REFERENCE)
+            / CRF_BITRATE_STEP
+        )
+
+    estimated_video_bitrate = max(
+        1,
+        int(
+            width
+            * height
+            * fps
+            * recommended_bits_per_pixel
+            * quality_multiplier
+        ),
+    )
+
+    return QUALITY_ESTIMATE_SCALE * (
+        (estimated_video_bitrate + QUALITY_AUDIO_BITRATE)
+        * duration
+        / 8
+        / 1_000_000
+        / (1 - CONTAINER_OVERHEAD_RATIO)
+    )
+
+
 def calculate_target_video_bitrate(
     target_size_mb,
     duration,
@@ -212,7 +372,18 @@ def calculate_target_video_bitrate(
     if duration <= 0:
         raise ValueError("The video duration must be greater than zero.")
 
-    target_bits = target_size_mb * 1_000_000 * 8
+    # Aim slightly below the upload limit to allow for bitrate
+    # variation and MP4 metadata.
+    safe_target_size_mb = (
+        target_size_mb
+        * TARGET_SIZE_SAFETY_RATIO
+    )
+
+    target_bits = (
+        safe_target_size_mb
+        * 1_000_000
+        * 8
+    )
 
     usable_bits = target_bits * (1 - CONTAINER_OVERHEAD_RATIO)
 
@@ -385,6 +556,40 @@ def build_video_encoder_arguments(
 # -- FFmpeg Command --
 
 
+def get_audio_stream_codecs(input_path):
+    """Return the codec name for each audio stream in the input."""
+
+    ffprobe_path = find_ffprobe()
+
+    result = subprocess.run(
+        [
+            ffprobe_path,
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "json",
+            str(input_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+        creationflags=hidden_process_flags(),
+    )
+
+    probe_data = json.loads(result.stdout)
+
+    return [
+        stream.get("codec_name")
+        for stream in probe_data.get("streams", [])
+    ]
+
+
 def build_upscale_command(
     input_path,
     output_path,
@@ -398,6 +603,10 @@ def build_upscale_command(
     target_size_mb=None,
     duration=None,
     source_fps=None,
+    trim_start=0.0,
+    trim_end=None,
+    merge_audio_tracks=False,
+    audio_stream_codecs=None,
 ):
     """
     Validate the settings and build an FFmpeg command.
@@ -436,13 +645,55 @@ def build_upscale_command(
     }:
         raise ValueError(f"Unknown rate-control mode: {rate_control}")
 
+    # -- Trim Validation --
+
+    if trim_start < 0:
+        raise ValueError(
+            "The trim start cannot be negative."
+        )
+
+    if duration is not None:
+        if trim_start >= duration:
+            raise ValueError(
+                "The trim start must be inside the video."
+            )
+
+        if (
+            trim_end is not None
+            and trim_end > duration
+        ):
+            raise ValueError(
+                "The trim end cannot exceed the video duration."
+            )
+
+    if (
+        trim_end is not None
+        and trim_end <= trim_start
+    ):
+        raise ValueError(
+            "The trim end must be after the trim start."
+        )
+
+    selected_duration = None
+
+    if duration is not None:
+        end_time = (
+            trim_end
+            if trim_end is not None
+            else duration
+        )
+
+        selected_duration = (
+            end_time - trim_start
+        )
+
     video_bitrate = None
 
     if rate_control == "target_size":
         if target_size_mb is None:
             raise ValueError("Enter a target file size.")
 
-        if duration is None:
+        if selected_duration is None:
             raise ValueError("Video duration is required for target-size mode.")
 
         effective_fps = fps if fps is not None else source_fps
@@ -454,7 +705,7 @@ def build_upscale_command(
 
         video_bitrate = calculate_target_video_bitrate(
             target_size_mb=target_size_mb,
-            duration=duration,
+            duration=selected_duration,
             width=width,
             height=height,
             fps=effective_fps,
@@ -468,6 +719,9 @@ def build_upscale_command(
         video_bitrate=video_bitrate,
     )
 
+    if audio_stream_codecs is None:
+        audio_stream_codecs = get_audio_stream_codecs(input_path)
+
     if rate_control == "target_size":
         # A known audio bitrate makes the final size more predictable.
         audio_arguments = [
@@ -479,10 +733,53 @@ def build_upscale_command(
 
     else:
         # Quality mode can preserve the original compressed audio.
+        # Convert the source audio to AAC for reliable MP4 playback.
+        # WebM files commonly contain Opus audio, which Discord may not
+        # recognise as an inline-playable MP4.
         audio_arguments = [
             "-c:a",
-            "copy",
+            "aac",
+            "-b:a",
+            "192k",
         ]
+
+    # Copy AAC streams to retain their original bitrate and avoid
+    # unnecessary lossy re-encoding. Other formats are converted to AAC
+    # for compatibility with the MP4 output.
+    for audio_index, codec in enumerate(audio_stream_codecs):
+        if not merge_audio_tracks and codec == "aac":
+            audio_arguments.extend(
+                [
+                    f"-c:a:{audio_index}",
+                    "copy",
+                ]
+            )
+
+    # Seeking before the input lets FFmpeg reach the selected
+    # starting position efficiently. Because the video is then
+    # re-encoded, FFmpeg can still produce an accurate start point.
+
+    input_arguments = []
+
+    if trim_start > 0:
+        input_arguments.extend([
+            "-ss",
+            str(trim_start),
+        ])
+
+    input_arguments.extend([
+        "-i",
+        str(input_path),
+    ])
+
+    if selected_duration is not None and (
+        trim_start > 0
+        or trim_end is not None
+    ):
+        input_arguments.extend([
+            "-t",
+            str(selected_duration),
+        ])
 
     arguments = [
         # Send machine-readable progress to stdout for the Qt progress bar.
@@ -492,14 +789,8 @@ def build_upscale_command(
         "-hide_banner",
         # Refuse to overwrite an existing output.
         "-n",
-        # Input
-        "-i",
-        str(input_path),
-        # First video stream and optional audio stream
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a:0?",
+        # Input and optional trim range
+        *input_arguments,
         # Upscaling
         "-vf",
         f"scale={width}:{height}:flags=lanczos",
@@ -508,13 +799,55 @@ def build_upscale_command(
         # Broad playback compatibility
         "-pix_fmt",
         "yuv420p",
+    ]
+
+    if merge_audio_tracks and len(audio_stream_codecs) > 1:
+        # Mix every input audio stream into one AAC track.
+        audio_filter = (
+            "".join(
+                f"[0:a:{audio_index}]"
+                for audio_index in range(len(audio_stream_codecs))
+            )
+            + (
+                f"amix=inputs={len(audio_stream_codecs)}:"
+                "duration=longest[aout]"
+            )
+        )
+
+        arguments.extend(
+            [
+                "-filter_complex",
+                audio_filter,
+                "-map",
+                "0:v:0",
+                "-map",
+                "[aout]",
+            ]
+        )
+
+        # Mixing requires encoding the combined audio stream.
+        arguments.extend(audio_arguments)
+
+    else:
         # Copy audio in quality mode or use a predictable bitrate
         # when targeting a file size.
-        *audio_arguments,
-        # Make MP4 begin playback sooner when streamed
-        "-movflags",
-        "+faststart",
-    ]
+        arguments.extend(
+            [
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a?",
+                *audio_arguments,
+            ]
+        )
+
+    arguments.extend(
+        [
+            # Make MP4 begin playback sooner when streamed
+            "-movflags",
+            "+faststart",
+        ]
+    )
 
     # hvc1 improves H.265 recognition in Apple players and devices.
     if ENCODER_PROFILES[encoder]["codec"] == "h265":

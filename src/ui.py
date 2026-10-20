@@ -6,6 +6,7 @@ from PyQt6.QtCore import (
     QObject,
     QProcess,
     QRectF,
+    QSize,
     Qt,
     QThread,
     QTimer,
@@ -44,7 +45,7 @@ from ffmpeg_runner import build_upscale_command
 from queue_page import QueuePage
 from render_job import RenderJob, RenderStatus
 from render_queue import RenderQueue
-from settings_page import SettingsPage
+from settings_page import SettingsPage, format_video_duration
 
 # Prevent FFmpeg and FFprobe from opening console windows on Windows.
 SUBPROCESS_FLAGS = getattr(
@@ -113,21 +114,6 @@ def read_video_properties(file_path):
         "format": Path(file_path).suffix.removeprefix(".").upper(),
         "file_size": int(video_format.get("size", 0)),
     }
-
-
-def format_duration(duration_seconds):
-    """Convert a duration in seconds into hours, minutes and seconds."""
-
-    total_seconds = round(duration_seconds)
-
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    seconds = total_seconds % 60
-
-    if hours > 0:
-        return f"{hours}:{minutes:02}:{seconds:02}"
-
-    return f"{minutes}:{seconds:02}"
 
 
 def create_video_thumbnail(file_path):
@@ -381,8 +367,18 @@ class DropArea(QFrame):
         if self.thumbnail is None:
             return
 
+        self.label.setPixmap(
+            self.create_rounded_thumbnail(self.label.size())
+        )
+
+    def create_rounded_thumbnail(self, size):
+        """Scale and clip the source thumbnail to the requested size."""
+
+        if self.thumbnail is None:
+            return QPixmap()
+
         scaled_thumbnail = self.thumbnail.scaled(
-            self.label.size(),
+            size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
@@ -407,7 +403,7 @@ class DropArea(QFrame):
         painter.drawPixmap(0, 0, scaled_thumbnail)
         painter.end()
 
-        self.label.setPixmap(rounded_thumbnail)
+        return rounded_thumbnail
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -456,6 +452,7 @@ class MainWindow(QMainWindow):
         self.video_fps = 0.0
         self.video_width = 0
         self.video_height = 0
+        self.video_file_size = 0
 
         self.setWindowTitle("ffupscale")
         self.resize(975, 555)
@@ -660,6 +657,7 @@ class MainWindow(QMainWindow):
             self.video_fps = properties["fps"]
 
             self.video_duration = properties["duration"]
+            self.video_file_size = properties["file_size"]
 
             file_size_mb = properties["file_size"] / (1024 * 1024)
 
@@ -669,7 +667,9 @@ class MainWindow(QMainWindow):
 
             self.fps_value.setText(f"{properties['fps']:.2f} FPS")
 
-            self.duration_value.setText(format_duration(properties["duration"]))
+            self.duration_value.setText(
+                format_video_duration(properties["duration"])
+            )
 
             self.codec_value.setText(properties["codec"].upper())
 
@@ -714,6 +714,10 @@ class MainWindow(QMainWindow):
             source_fps=self.video_fps,
             source_width=self.video_width,
             source_height=self.video_height,
+            file_size=self.video_file_size,
+            thumbnail=self.drop_area.create_rounded_thumbnail(
+                QSize(160, 91)
+            ),
         )
 
         self.pages.setCurrentWidget(self.settings_page)
@@ -803,7 +807,10 @@ class MainWindow(QMainWindow):
 
                         self.current_job.set_progress(percentage)
 
-                        self.settings_page.set_progress(percentage)
+                        self.settings_page.set_progress(
+                            percentage,
+                            self.current_job.remaining_time_text,
+                        )
 
                         self.queue_page.update_job(
                             self.current_job,
@@ -816,7 +823,10 @@ class MainWindow(QMainWindow):
             elif key == "progress" and value == "end" and self.current_job is not None:
                 self.current_job.set_progress(100)
 
-                self.settings_page.set_progress(100)
+                self.settings_page.set_progress(
+                    100,
+                    self.current_job.remaining_time_text,
+                )
 
                 self.queue_page.update_job(
                     self.current_job,
@@ -1009,11 +1019,52 @@ class MainWindow(QMainWindow):
         self.render_queue.clear_completed()
         self.refresh_queue_page()
 
+    def create_available_output_path(
+        self,
+        requested_path,
+    ):
+        """
+        Return an unused path on disk and in the render queue.
+
+        Duplicate names use the Windows-style format:
+        video.mp4, video (1).mp4, video (2).mp4.
+        """
+
+        requested_path = Path(
+            requested_path
+        )
+
+        reserved_paths = {
+            str(job.output_path.resolve()).casefold()
+            for job in self.render_queue.jobs
+        }
+
+        candidate = requested_path
+        number = 1
+
+        while (
+            candidate.exists()
+            or str(
+                candidate.resolve()
+            ).casefold() in reserved_paths
+        ):
+            candidate = requested_path.with_name(
+                f"{requested_path.stem}"
+                f" ({number})"
+                f"{requested_path.suffix}"
+            )
+
+            number += 1
+
+        return candidate
+
     def create_render_job(self, settings):
-        """Create and validate a job from the current selection."""
+        """Create a job with a unique output path."""
 
         if self.selected_video is None:
-            raise ValueError("Select a video first.")
+            raise ValueError(
+                "Select a video first."
+            )
 
         job = RenderJob.from_settings(
             input_path=self.selected_video,
@@ -1022,11 +1073,11 @@ class MainWindow(QMainWindow):
             settings=settings,
         )
 
-        new_output = job.output_path.resolve()
-
-        for existing_job in self.render_queue.jobs:
-            if existing_job.output_path.resolve() == new_output:
-                raise ValueError("Another queued video already uses this output path.")
+        job.output_path = (
+            self.create_available_output_path(
+                job.output_path
+            )
+        )
 
         return job
 
@@ -1050,8 +1101,11 @@ class MainWindow(QMainWindow):
                 preset=job.preset,
                 rate_control=job.rate_control,
                 target_size_mb=job.target_size_mb,
-                duration=job.duration,
+                duration=job.source_duration,
                 source_fps=job.source_fps,
+                trim_start=job.trim_start,
+                trim_end=job.trim_end,
+                merge_audio_tracks=job.merge_audio_tracks,
             )
 
             self.current_job = job
