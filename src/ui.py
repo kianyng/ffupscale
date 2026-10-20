@@ -6,6 +6,7 @@ from PyQt6.QtCore import (
     QObject,
     QProcess,
     QRectF,
+    QSize,
     Qt,
     QThread,
     QTimer,
@@ -44,7 +45,7 @@ from ffmpeg_runner import build_upscale_command
 from queue_page import QueuePage
 from render_job import RenderJob, RenderStatus
 from render_queue import RenderQueue
-from settings_page import SettingsPage
+from settings_page import SettingsPage, format_video_duration
 
 # Prevent FFmpeg and FFprobe from opening console windows on Windows.
 SUBPROCESS_FLAGS = getattr(
@@ -113,21 +114,6 @@ def read_video_properties(file_path):
         "format": Path(file_path).suffix.removeprefix(".").upper(),
         "file_size": int(video_format.get("size", 0)),
     }
-
-
-def format_duration(duration_seconds):
-    """Convert a duration in seconds into hours, minutes and seconds."""
-
-    total_seconds = round(duration_seconds)
-
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    seconds = total_seconds % 60
-
-    if hours > 0:
-        return f"{hours}:{minutes:02}:{seconds:02}"
-
-    return f"{minutes}:{seconds:02}"
 
 
 def create_video_thumbnail(file_path):
@@ -381,8 +367,18 @@ class DropArea(QFrame):
         if self.thumbnail is None:
             return
 
+        self.label.setPixmap(
+            self.create_rounded_thumbnail(self.label.size())
+        )
+
+    def create_rounded_thumbnail(self, size):
+        """Scale and clip the source thumbnail to the requested size."""
+
+        if self.thumbnail is None:
+            return QPixmap()
+
         scaled_thumbnail = self.thumbnail.scaled(
-            self.label.size(),
+            size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
@@ -407,7 +403,7 @@ class DropArea(QFrame):
         painter.drawPixmap(0, 0, scaled_thumbnail)
         painter.end()
 
-        self.label.setPixmap(rounded_thumbnail)
+        return rounded_thumbnail
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -456,6 +452,7 @@ class MainWindow(QMainWindow):
         self.video_fps = 0.0
         self.video_width = 0
         self.video_height = 0
+        self.video_file_size = 0
 
         self.setWindowTitle("ffupscale")
         self.resize(975, 555)
@@ -660,6 +657,7 @@ class MainWindow(QMainWindow):
             self.video_fps = properties["fps"]
 
             self.video_duration = properties["duration"]
+            self.video_file_size = properties["file_size"]
 
             file_size_mb = properties["file_size"] / (1024 * 1024)
 
@@ -669,7 +667,9 @@ class MainWindow(QMainWindow):
 
             self.fps_value.setText(f"{properties['fps']:.2f} FPS")
 
-            self.duration_value.setText(format_duration(properties["duration"]))
+            self.duration_value.setText(
+                format_video_duration(properties["duration"])
+            )
 
             self.codec_value.setText(properties["codec"].upper())
 
@@ -714,6 +714,10 @@ class MainWindow(QMainWindow):
             source_fps=self.video_fps,
             source_width=self.video_width,
             source_height=self.video_height,
+            file_size=self.video_file_size,
+            thumbnail=self.drop_area.create_rounded_thumbnail(
+                QSize(160, 91)
+            ),
         )
 
         self.pages.setCurrentWidget(self.settings_page)

@@ -38,6 +38,20 @@ QUALITY_ESTIMATE_SAMPLE_DURATION = 1.0
 QUALITY_ESTIMATE_MAX_SAMPLED_DURATION = 3.0
 
 
+def format_video_duration(duration_seconds):
+    """Format a duration as hours, minutes, and seconds."""
+
+    total_seconds = round(duration_seconds)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+
+    if hours > 0:
+        return f"{hours}:{minutes:02}:{seconds:02}"
+
+    return f"{minutes}:{seconds:02}"
+
+
 class QualityEstimateWorker(QThread):
     """Estimate output size by encoding short video samples in the background."""
 
@@ -303,12 +317,67 @@ class SettingsPage(QWidget):
 
         # -- Page Header --
 
-        title = QLabel("Upscale settings")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title = QLabel("Settings")
+        title.setAlignment(
+            Qt.AlignmentFlag.AlignLeft
+            | Qt.AlignmentFlag.AlignVCenter
+        )
         title.setStyleSheet("""
             font-size: 32px;
             font-weight: bold;
         """)
+
+        self.video_thumbnail = QLabel("No preview")
+        self.video_thumbnail.setFixedSize(160, 91)
+        self.video_thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_thumbnail.setStyleSheet("""
+            background-color: #242424;
+            border-radius: 10px;
+            color: #999999;
+            font-size: 11px;
+        """)
+
+        self.video_resolution = QLabel("—")
+        self.video_duration_label = QLabel("—")
+        self.video_fps = QLabel("—")
+        self.video_file_size = QLabel("—")
+
+        video_metadata_layout = QHBoxLayout()
+        video_metadata_layout.setContentsMargins(0, 0, 0, 0)
+        video_metadata_layout.setSpacing(20)
+
+        for label, value in (
+            ("Resolution", self.video_resolution),
+            ("Duration", self.video_duration_label),
+            ("FPS", self.video_fps),
+            ("File size", self.video_file_size),
+        ):
+            metadata_item = QVBoxLayout()
+            metadata_item.setContentsMargins(0, 0, 0, 0)
+            metadata_item.setSpacing(2)
+
+            caption = QLabel(label)
+            caption.setStyleSheet("""
+                color: #999999;
+                font-size: 11px;
+            """)
+            value.setStyleSheet("""
+                font-size: 13px;
+                font-weight: bold;
+            """)
+
+            metadata_item.addWidget(caption)
+            metadata_item.addWidget(value)
+            video_metadata_layout.addLayout(metadata_item)
+
+        video_summary_layout = QVBoxLayout()
+        video_summary_layout.setContentsMargins(0, 0, 0, 8)
+        video_summary_layout.setSpacing(4)
+        video_summary_layout.addWidget(title)
+        video_summary_layout.addLayout(video_metadata_layout)
+
+        video_summary_widget = QWidget()
+        video_summary_widget.setLayout(video_summary_layout)
 
         self.view_queue_button = QPushButton("View queue")
 
@@ -324,11 +393,6 @@ class SettingsPage(QWidget):
 
         self.view_queue_button.clicked.connect(self.view_queue_requested.emit)
 
-        # A matching spacer keeps the title centred in the page,
-        # rather than centred only in the remaining space.
-        header_spacer = QWidget()
-        header_spacer.setFixedWidth(self.view_queue_button.width())
-
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(
             0,
@@ -336,19 +400,30 @@ class SettingsPage(QWidget):
             0,
             0,
         )
-        header_layout.setSpacing(10)
-
-        header_layout.addWidget(header_spacer)
-
+        header_layout.setSpacing(8)
+        header_layout.addWidget(self.video_thumbnail)
         header_layout.addWidget(
-            title,
+            video_summary_widget,
             stretch=1,
+            alignment=Qt.AlignmentFlag.AlignVCenter,
         )
 
-        header_layout.addWidget(self.view_queue_button)
+        header_layout.addWidget(
+            self.view_queue_button,
+            alignment=Qt.AlignmentFlag.AlignVCenter,
+        )
 
         self.video_name = QLabel("No video selected")
-        self.video_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.video_name.setAlignment(
+            Qt.AlignmentFlag.AlignLeft
+            | Qt.AlignmentFlag.AlignVCenter
+        )
+
+        header_section_layout = QVBoxLayout()
+        header_section_layout.setContentsMargins(0, 0, 0, 0)
+        header_section_layout.setSpacing(10)
+        header_section_layout.addLayout(header_layout)
+        header_section_layout.addWidget(self.video_name)
 
         # -- Trim Range --
 
@@ -1166,9 +1241,7 @@ class SettingsPage(QWidget):
         layout.setContentsMargins(30, 20, 30, 30)
         layout.setSpacing(20)
 
-        layout.addLayout(header_layout)
-
-        layout.addWidget(self.video_name)
+        layout.addLayout(header_section_layout)
 
         # The form expands into the available space and becomes scrollable
         # when the window is not tall enough.
@@ -1195,6 +1268,8 @@ class SettingsPage(QWidget):
         source_fps=None,
         source_width=None,
         source_height=None,
+        file_size=None,
+        thumbnail=None,
     ):
         """Display the input and suggest an output location."""
 
@@ -1205,6 +1280,37 @@ class SettingsPage(QWidget):
         self.input_path = new_input_path
 
         self.video_name.setText(new_input_path.name)
+
+        if thumbnail is not None and not thumbnail.isNull():
+            self.video_thumbnail.setPixmap(thumbnail)
+        else:
+            self.video_thumbnail.clear()
+            self.video_thumbnail.setText("No preview")
+
+        self.video_resolution.setText(
+            (
+                f"{source_width} × {source_height}"
+                if source_width is not None and source_height is not None
+                else "—"
+            )
+        )
+        self.video_duration_label.setText(
+            (
+                format_video_duration(duration)
+                if duration is not None
+                else "—"
+            )
+        )
+        self.video_fps.setText(
+            f"{source_fps:.2f} FPS"
+            if source_fps is not None
+            else "—"
+        )
+        self.video_file_size.setText(
+            f"{file_size / (1024 * 1024):.2f} MB"
+            if file_size is not None
+            else "—"
+        )
 
         self.video_duration = duration
         self.source_fps = source_fps
