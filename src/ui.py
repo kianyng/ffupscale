@@ -1106,6 +1106,8 @@ class MainWindow(QMainWindow):
                 trim_start=job.trim_start,
                 trim_end=job.trim_end,
                 merge_audio_tracks=job.merge_audio_tracks,
+                output_format=job.output_format,
+                gif_dither=job.gif_dither,
             )
 
             self.current_job = job

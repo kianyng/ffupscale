@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -29,6 +30,7 @@ from ffmpeg_runner import (
     calculate_estimated_quality_size_mb,
     calculate_minimum_target_size_mb,
     calculate_recommended_target_size_mb,
+    calculate_gif_palette_colors,
     build_upscale_command,
     get_audio_stream_codecs,
 )
@@ -72,6 +74,7 @@ class QualityEstimateWorker(QThread):
         self.cancel_requested = threading.Event()
         self.process_lock = threading.Lock()
         self.active_process = None
+        self.result_emitted = False
 
     def cancel(self):
         """Request cancellation and stop the currently running FFmpeg process."""
@@ -96,8 +99,12 @@ class QualityEstimateWorker(QThread):
             OSError,
             ValueError,
             subprocess.SubprocessError,
+            TypeError,
+            KeyError,
+            RuntimeError,
         ) as error:
             if not self.cancel_requested.is_set():
+                self.result_emitted = True
                 self.estimate_failed.emit(
                     self.generation,
                     self.estimate_key,
@@ -109,6 +116,7 @@ class QualityEstimateWorker(QThread):
                 estimated_size is not None
                 and not self.cancel_requested.is_set()
             ):
+                self.result_emitted = True
                 self.estimate_ready.emit(
                     self.generation,
                     self.estimate_key,
@@ -149,7 +157,12 @@ class QualityEstimateWorker(QThread):
             ]
 
         input_path = settings["input_path"]
-        audio_stream_codecs = get_audio_stream_codecs(input_path)
+        output_format = settings["output_format"]
+        audio_stream_codecs = (
+            get_audio_stream_codecs(input_path)
+            if output_format != "gif"
+            else None
+        )
 
         sampled_bytes = 0
         sampled_duration = 0.0
@@ -164,7 +177,9 @@ class QualityEstimateWorker(QThread):
                     return None
 
                 sample_duration = sample_end - sample_start
-                output_path = temporary_path / f"sample_{index}.mp4"
+                output_path = (
+                    temporary_path / f"sample_{index}.{output_format}"
+                )
 
                 ffmpeg_path, arguments = build_upscale_command(
                     input_path=input_path,
@@ -181,6 +196,8 @@ class QualityEstimateWorker(QThread):
                     trim_start=sample_start,
                     trim_end=sample_end,
                     merge_audio_tracks=settings["merge_audio_tracks"],
+                    output_format=output_format,
+                    gif_dither=settings["gif_dither"],
                     audio_stream_codecs=audio_stream_codecs,
                 )
 
@@ -496,6 +513,18 @@ class SettingsPage(QWidget):
             self.update_automatic_recommendation
         )
 
+        self.trim_checkbox.toggled.connect(
+            self.update_quality_size_estimate
+        )
+
+        self.trim_start_box.valueChanged.connect(
+            self.update_quality_size_estimate
+        )
+
+        self.trim_end_box.valueChanged.connect(
+            self.update_quality_size_estimate
+        )
+
         # -- Resolution Settings --
 
         self.resolution_box = QComboBox()
@@ -614,6 +643,18 @@ class SettingsPage(QWidget):
         self.fps_box.currentIndexChanged.connect(self.update_target_size_estimate)
 
         self.custom_fps.valueChanged.connect(self.update_target_size_estimate)
+
+        self.gif_dither_box = QComboBox()
+        self.gif_dither_box.addItem("Sierra 2-4a (smooth)", "sierra2_4a")
+        self.gif_dither_box.addItem("Bayer (ordered)", "bayer")
+        self.gif_dither_box.addItem("None", "none")
+        self.gif_dither_box.setToolTip(
+            "Dithering can improve gradients and texture, but may increase "
+            "GIF file size. Bayer and no dithering can produce smaller files."
+        )
+        self.gif_dither_box.currentIndexChanged.connect(
+            self.update_quality_size_estimate
+        )
 
         self.auto_resolution_checkbox = QCheckBox(
             "Automatically choose resolution and frame rate"
@@ -746,8 +787,10 @@ class SettingsPage(QWidget):
         )
         quality_controls_layout.addWidget(self.quality_value)
 
-        quality_help = QLabel("1: lowest quality · 30: balanced · 51: best quality")
-        quality_help.setStyleSheet("""
+        self.quality_help = QLabel(
+            "1: lowest quality · 30: balanced · 51: best quality"
+        )
+        self.quality_help.setStyleSheet("""
             color: #999999;
             font-size: 11px;
         """)
@@ -772,7 +815,7 @@ class SettingsPage(QWidget):
         quality_widget_layout.setSpacing(4)
         quality_widget_layout.addLayout(quality_controls_layout)
         quality_widget_layout.addWidget(self.quality_size_label)
-        quality_widget_layout.addWidget(quality_help)
+        quality_widget_layout.addWidget(self.quality_help)
 
         self.quality_widget = QWidget()
         self.quality_widget.setLayout(quality_widget_layout)
@@ -823,6 +866,17 @@ class SettingsPage(QWidget):
         self.target_size_label = QLabel("Target size:")
 
         self.quality_label = QLabel("Quality:")
+        self.gif_dither_label = QLabel("GIF dithering:")
+
+        # Create the format selector before encoder initialization, which
+        # refreshes quality estimates during construction.
+        self.output_format_box = QComboBox()
+        self.output_format_box.addItem("MP4", "mp4")
+        self.output_format_box.addItem("GIF", "gif")
+        self.output_format_box.addItem("MKV", "mkv")
+        self.output_format_box.currentIndexChanged.connect(
+            self.update_output_format
+        )
 
         # -- Encoder Settings --
 
@@ -909,7 +963,9 @@ class SettingsPage(QWidget):
 
         # Output filename
         self.output_filename_edit = QLineEdit()
-        self.output_filename_edit.setPlaceholderText("video_upscaled.mp4")
+        self.output_filename_edit.setPlaceholderText(
+            f"video_upscaled.{self.output_format_box.currentData()}"
+        )
 
         # Show the complete location that will be passed to FFmpeg.
         self.output_path_preview = QLabel("—")
@@ -941,6 +997,8 @@ class SettingsPage(QWidget):
         # -- Settings Form --
 
         settings_form = QFormLayout()
+        self.settings_form = settings_form
+        self.section_dividers = []
         settings_form.setVerticalSpacing(20)
         settings_form.addRow(
             "Trim:",
@@ -985,6 +1043,7 @@ class SettingsPage(QWidget):
             "",
             self.trim_information_widget,
         )
+        settings_form.addRow(self.create_section_divider())
         settings_form.addRow(
             "Resolution:",
             self.resolution_box,
@@ -1012,6 +1071,11 @@ class SettingsPage(QWidget):
         )
 
         settings_form.addRow(
+            self.gif_dither_label,
+            self.gif_dither_box,
+        )
+
+        settings_form.addRow(
             "",
             self.auto_resolution_checkbox,
         )
@@ -1021,6 +1085,7 @@ class SettingsPage(QWidget):
             self.auto_recommendation_label,
         )
 
+        settings_form.addRow(self.create_section_divider())
         settings_form.addRow(
             "Size control:",
             self.rate_control_box,
@@ -1036,6 +1101,7 @@ class SettingsPage(QWidget):
             self.target_size_widget,
         )
 
+        settings_form.addRow(self.create_section_divider())
         settings_form.addRow(
             "",
             self.gpu_encoding_checkbox,
@@ -1056,6 +1122,7 @@ class SettingsPage(QWidget):
             self.preset_box,
         )
 
+        settings_form.addRow(self.create_section_divider())
         settings_form.addRow(
             "Output folder:",
             self.output_folder_widget,
@@ -1067,11 +1134,18 @@ class SettingsPage(QWidget):
         )
 
         settings_form.addRow(
+            "Output format:",
+            self.output_format_box,
+        )
+
+        settings_form.addRow(
             "Output path:",
             self.output_path_preview,
         )
 
+        settings_form.addRow(self.create_section_divider())
         advanced_heading = QLabel("Advanced")
+        self.advanced_heading = advanced_heading
         advanced_heading.setStyleSheet("""
             font-weight: bold;
         """)
@@ -1239,6 +1313,9 @@ class SettingsPage(QWidget):
         self.update_custom_fps_visibility()
         self.update_auto_resolution_controls()
         self.update_rate_control_visibility()
+        self.update_format_visibility()
+        self.update_quality_display(self.quality_slider.value())
+        self.update_target_size_estimate()
         self.update_trim_controls()
 
     # -- Video and Output Selection --
@@ -1367,7 +1444,10 @@ class SettingsPage(QWidget):
         if video_changed or not self.output_folder_edit.text():
             self.output_folder_edit.setText(str(new_input_path.parent))
 
-            self.output_filename_edit.setText(f"{new_input_path.stem}_upscaled.mp4")
+            self.output_filename_edit.setText(
+                f"{new_input_path.stem}_upscaled."
+                f"{self.output_format_box.currentData()}"
+            )
 
         self.update_output_path_preview()
         self.update_trim_controls()
@@ -1402,8 +1482,52 @@ class SettingsPage(QWidget):
 
         self.output_path_preview.setText(str(output_path))
 
+    def create_section_divider(self):
+        """Create a short, inset divider between settings sections."""
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setFixedHeight(1)
+        divider.setStyleSheet("color: #444444;")
+
+        divider_layout = QHBoxLayout()
+        divider_layout.setContentsMargins(14, 7, 14, 7)
+        divider_layout.addWidget(divider)
+
+        widget = QWidget()
+        widget.setLayout(divider_layout)
+        self.section_dividers.append(widget)
+        return widget
+
+    def update_output_format(self):
+        """Keep a recognized filename extension in sync with the format."""
+
+        filename = self.output_filename_edit.text().strip()
+        selected_format = self.output_format_box.currentData()
+
+        if filename and selected_format:
+            filename_path = Path(filename)
+
+            if filename_path.suffix.lower() in {".mp4", ".gif", ".mkv"}:
+                self.output_filename_edit.setText(
+                    f"{filename_path.stem}.{selected_format}"
+                )
+            elif not filename_path.suffix:
+                self.output_filename_edit.setText(
+                    f"{filename}.{selected_format}"
+                )
+
+        self.output_filename_edit.setPlaceholderText(
+            f"video_upscaled.{selected_format}"
+        )
+
+        self.update_format_visibility()
+        self.update_output_path_preview()
+        self.update_quality_display(self.quality_slider.value())
+        self.update_target_size_estimate()
+
     def get_output_path(self):
-        """Return a validated MP4 output path."""
+        """Return a validated output path with the selected format extension."""
 
         if self.input_path is None:
             raise ValueError("No input video has been selected.")
@@ -1423,6 +1547,9 @@ class SettingsPage(QWidget):
         if not filename:
             raise ValueError("Enter an output filename.")
 
+        output_format = self.output_format_box.currentData()
+        expected_suffix = f".{output_format}"
+
         invalid_characters = '<>:"/\\|?*'
 
         if any(character in filename for character in invalid_characters):
@@ -1433,13 +1560,20 @@ class SettingsPage(QWidget):
         filename_path = Path(filename)
 
         if not filename_path.suffix:
-            filename = f"{filename}.mp4"
+            filename = f"{filename}{expected_suffix}"
 
             # Keep the visible filename consistent with the actual one.
             self.output_filename_edit.setText(filename)
 
-        elif filename_path.suffix.lower() != ".mp4":
-            raise ValueError("The output filename must use the .mp4 extension.")
+        elif filename_path.suffix.lower() in {".mp4", ".gif", ".mkv"}:
+            if filename_path.suffix.lower() != expected_suffix:
+                filename = f"{filename_path.stem}{expected_suffix}"
+                self.output_filename_edit.setText(filename)
+
+        elif filename_path.suffix.lower() != expected_suffix:
+            raise ValueError(
+                f"The output filename must use the {expected_suffix} extension."
+            )
 
         output_path = output_folder / filename
 
@@ -1606,11 +1740,45 @@ class SettingsPage(QWidget):
 
         target_size_selected = self.rate_control_box.currentData() == "target_size"
 
+        self.rate_control_box.setVisible(True)
         self.quality_label.setVisible(not target_size_selected)
         self.quality_widget.setVisible(not target_size_selected)
+        self.quality_size_label.setVisible(True)
 
         self.target_size_label.setVisible(target_size_selected)
         self.target_size_widget.setVisible(target_size_selected)
+
+    def update_format_visibility(self):
+        """Show only settings that apply to the selected output format."""
+
+        is_gif = self.output_format_box.currentData() == "gif"
+
+        self.auto_resolution_checkbox.setVisible(not is_gif)
+        self.auto_recommendation_label.setVisible(not is_gif)
+        self.gpu_encoding_checkbox.setVisible(not is_gif)
+        self.gpu_status.setVisible(not is_gif)
+        self.encoder_box.setVisible(not is_gif)
+        self.preset_box.setVisible(not is_gif)
+        self.merge_audio_tracks_checkbox.setVisible(not is_gif)
+        self.advanced_heading.setVisible(not is_gif)
+        self.gif_dither_label.setVisible(is_gif)
+        self.gif_dither_box.setVisible(is_gif)
+
+        for field in (
+            self.gpu_status,
+            self.encoder_box,
+            self.preset_box,
+        ):
+            label = self.settings_form.labelForField(field)
+
+            if label is not None:
+                label.setVisible(not is_gif)
+
+        for index, divider in enumerate(self.section_dividers):
+            divider.setVisible(index < 2 or not is_gif)
+
+        self.update_auto_resolution_controls()
+        self.update_rate_control_visibility()
 
     def update_custom_resolution_visibility(self):
         """Show custom dimensions only when Custom is selected."""
@@ -1636,13 +1804,17 @@ class SettingsPage(QWidget):
         target_size_selected = (
             self.rate_control_box.currentData() == "target_size"
         )
+        is_gif = self.output_format_box.currentData() == "gif"
         automatic_selection_active = (
             self.auto_resolution_checkbox.isChecked()
             and target_size_selected
+            and not is_gif
         )
         manual_controls_enabled = not automatic_selection_active
 
-        self.auto_resolution_checkbox.setEnabled(target_size_selected)
+        self.auto_resolution_checkbox.setEnabled(
+            target_size_selected and not is_gif
+        )
         self.resolution_box.setEnabled(manual_controls_enabled)
         self.custom_resolution_label.setEnabled(manual_controls_enabled)
         self.custom_resolution_widget.setEnabled(manual_controls_enabled)
@@ -1657,6 +1829,9 @@ class SettingsPage(QWidget):
         _value=None,
     ):
         """Choose suitable resolution and FPS settings for the target size."""
+
+        if self.output_format_box.currentData() == "gif":
+            return
 
         if not self.auto_resolution_checkbox.isChecked():
             self.auto_recommendation_label.setText(
@@ -1918,9 +2093,31 @@ class SettingsPage(QWidget):
 
 
     def update_quality_display(self, value):
-        """Display the currently selected CRF value."""
+        """Display the selected video quality or GIF palette size."""
 
-        self.quality_value.setText(str(value))
+        if self.output_format_box.currentData() == "gif":
+            colors = calculate_gif_palette_colors(value)
+            self.quality_value.setText(str(colors))
+            self.quality_label.setText("Maximum colors:")
+            self.quality_help.setText(
+                "Fewer colors create smaller GIFs; more colors preserve detail."
+            )
+            self.quality_slider.setToolTip(
+                f"Use up to {colors} colors in the GIF palette. "
+                "Higher values preserve more color detail and can increase "
+                "file size."
+            )
+
+        else:
+            self.quality_value.setText(str(value))
+            self.quality_label.setText("Quality:")
+            self.quality_help.setText(
+                "1: lowest quality · 30: balanced · 51: best quality"
+            )
+            self.quality_slider.setToolTip(
+                "Higher values produce higher quality and larger files."
+            )
+
         self.update_quality_size_estimate()
 
     def update_target_size_estimate(
@@ -1930,6 +2127,24 @@ class SettingsPage(QWidget):
         """Update the appropriate size estimate for current settings."""
 
         self.update_quality_size_estimate()
+
+        if self.output_format_box.currentData() == "gif":
+            if self.rate_control_box.currentData() == "target_size":
+                self.target_size_estimate_label.setText(
+                    "Palette colors are reduced to approach the target; "
+                    "actual size depends on video content."
+                )
+                self.target_size_estimate_label.setToolTip(
+                    "GIF has no bitrate control. ffupscale reduces the palette "
+                    "to aim for the requested size; texture, motion and "
+                    "dithering can make the final size differ."
+                )
+            else:
+                self.target_size_estimate_label.setText(
+                    "GIF size depends on resolution, frame rate, and content."
+                )
+
+            return
 
         automatic_selection = (
             self.auto_resolution_checkbox.isChecked()
@@ -2010,6 +2225,8 @@ class SettingsPage(QWidget):
 
         self.quality_estimate_timer.stop()
 
+        output_format = self.output_format_box.currentData()
+
         if self.rate_control_box.currentData() != "quality":
             self.cancel_quality_estimate()
             self.quality_size_label.setText("Estimated size: —")
@@ -2050,7 +2267,10 @@ class SettingsPage(QWidget):
         encoder = self.encoder_box.currentData()
         preset = self.preset_box.currentData()
         selected_fps = self.get_fps()
+        quality = self.quality_slider.value()
+        gif_dither = self.gif_dither_box.currentData()
         estimate_key = (
+            output_format,
             str(self.input_path),
             self.video_duration,
             self.source_fps,
@@ -2062,17 +2282,29 @@ class SettingsPage(QWidget):
             encoder,
             preset,
             self.merge_audio_tracks_checkbox.isChecked(),
+            (
+                quality
+                if output_format == "gif"
+                else None
+            ),
+            (
+                gif_dither
+                if output_format == "gif"
+                else None
+            ),
         )
         settings = {
             "input_path": str(self.input_path),
+            "output_format": output_format,
             "source_duration": self.video_duration,
             "source_fps": self.source_fps,
             "trim_start": trim_start,
             "trim_end": selected_end,
             "width": width,
             "height": height,
-            "quality": self.quality_slider.value(),
+            "quality": quality,
             "fps": selected_fps,
+            "gif_dither": gif_dither,
             "encoder": encoder,
             "preset": preset,
             "merge_audio_tracks": (
@@ -2089,8 +2321,7 @@ class SettingsPage(QWidget):
             self._cancel_worker_for_different_estimate(estimate_key)
             self.pending_quality_estimate = None
             self.quality_size_label.setToolTip(
-                "Estimated by encoding short samples from this video. "
-                "Actual size may vary with scenes not sampled."
+                self.quality_estimate_tooltip(output_format)
             )
             self._display_calibrated_quality_estimate(
                 cached_estimate[0],
@@ -2136,6 +2367,10 @@ class SettingsPage(QWidget):
     ):
         """Apply the cached sample calibration to the current slider value."""
 
+        if self.output_format_box.currentData() == "gif":
+            self.display_quality_estimated_size(reference_size_mb)
+            return
+
         effective_fps = self.get_fps()
 
         if effective_fps is None:
@@ -2174,6 +2409,11 @@ class SettingsPage(QWidget):
             / reference_model_size
         )
 
+        self.display_quality_estimated_size(estimated_size)
+
+    def display_quality_estimated_size(self, estimated_size):
+        """Display a byte-size estimate using the app's standard units."""
+
         if estimated_size >= 1000:
             formatted_size = f"{estimated_size / 1000:.2f} GB"
 
@@ -2182,6 +2422,22 @@ class SettingsPage(QWidget):
 
         self.quality_size_label.setText(
             f"Estimated size: {formatted_size}"
+        )
+
+    @staticmethod
+    def quality_estimate_tooltip(output_format):
+        """Explain the source and limitations of the sample-based estimate."""
+
+        if output_format == "gif":
+            return (
+                "Estimated by encoding short GIF samples from the selected "
+                "trim range with the chosen palette and dithering. GIF size "
+                "varies with motion and content, so the final size may differ."
+            )
+
+        return (
+            "Estimated by encoding short samples from this video. "
+            "Actual size may vary with scenes not sampled."
         )
 
     def _cancel_worker_for_different_estimate(self, estimate_key):
@@ -2268,8 +2524,7 @@ class SettingsPage(QWidget):
             else self.video_duration - trim_start
         )
         self.quality_size_label.setToolTip(
-            "Estimated by encoding short samples from this video. "
-            "Actual size may vary with scenes not sampled."
+            self.quality_estimate_tooltip(estimate_key[0])
         )
         self._display_calibrated_quality_estimate(
             estimated_size,
@@ -2308,6 +2563,18 @@ class SettingsPage(QWidget):
 
         if worker is not self.quality_estimate_worker:
             return
+
+        if (
+            self.current_quality_estimate_key == worker.estimate_key
+            and not worker.result_emitted
+        ):
+            self.quality_size_label.setText(
+                "Estimated size: unavailable"
+            )
+            self.quality_size_label.setToolTip(
+                "The sample estimate ended before returning a result. "
+                "Check that FFmpeg can read and encode this video."
+            )
 
         self.quality_estimate_worker = None
         worker.deleteLater()
@@ -2405,9 +2672,11 @@ class SettingsPage(QWidget):
         return {
             "resolution": (width, height),
             "fps": self.get_fps(),
+            "output_format": self.output_format_box.currentData(),
             "rate_control": rate_control,
             "quality": self.quality_slider.value(),
             "target_size_mb": target_size_mb,
+            "gif_dither": self.gif_dither_box.currentData(),
             "encoder": self.encoder_box.currentData(),
             "preset": self.preset_box.currentData(),
             "output_path": self.get_output_path(),
@@ -2415,6 +2684,7 @@ class SettingsPage(QWidget):
             "trim_end": trim_end,
             "merge_audio_tracks": (
                 self.merge_audio_tracks_checkbox.isChecked()
+                and self.output_format_box.currentData() != "gif"
             ),
         }
 

@@ -74,6 +74,7 @@ installation or system `PATH` configuration is required.
 - Same-as-source, preset and custom resolutions
 - Original, preset and custom frame rates
 - H.264 and H.265 encoding
+- MP4 and MKV video exports, plus looping GIF exports
 - Automatic detection of usable CPU and GPU encoders
 - NVIDIA NVENC, AMD AMF and Intel Quick Sync support
 - Adjustable encoding quality and speed
@@ -151,6 +152,19 @@ reach the requested output size.
 The final size may differ slightly because encoder behaviour and MP4 container
 overhead cannot be predicted perfectly. ffupscale displays an estimated or
 recommended minimum when enough information is available.
+
+### Output formats
+
+MP4 and MKV exports use the selected H.264 or H.265 encoder and preserve audio.
+GIF exports use palette-based encoding, are looped, and contain no audio. The
+palette is generated from the first two seconds of the selected range so output
+can begin before the entire clip has been scanned. GIF quality controls the
+maximum palette size; target-size mode reduces the palette to aim for the
+requested size. Dithering can improve gradients and texture, but affects file
+size.
+Resolution, trimming and frame-rate settings apply to all three formats.
+GIF size depends heavily on content, motion and dithering, so the target is
+approximate rather than a guaranteed limit.
 
 ## Requirements
 

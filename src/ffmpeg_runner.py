@@ -16,6 +16,8 @@ ENCODING_SPEEDS = {
     "slow",
 }
 
+GIF_PALETTE_SAMPLE_DURATION = 2.0
+
 
 # -- Encoder Profiles --
 
@@ -590,6 +592,57 @@ def get_audio_stream_codecs(input_path):
     ]
 
 
+def calculate_gif_palette_colors(
+    quality,
+    target_size_mb=None,
+    width=None,
+    height=None,
+    duration=None,
+    fps=None,
+):
+    """Choose GIF palette colors from quality or a best-effort size target."""
+
+    if target_size_mb is None:
+        if isinstance(quality, bool) or not isinstance(quality, int):
+            raise TypeError("GIF quality must be a whole number.")
+
+        if not 1 <= quality <= 51:
+            raise ValueError("GIF quality must be between 1 and 51.")
+
+        return 2 + round((quality - 1) * 254 / 50)
+
+    if target_size_mb <= 0:
+        raise ValueError("Target file size must be greater than zero.")
+
+    if (
+        width is None
+        or height is None
+        or duration is None
+        or fps is None
+        or width <= 0
+        or height <= 0
+        or duration <= 0
+        or fps <= 0
+    ):
+        raise ValueError(
+            "Resolution, duration and frame rate are required "
+            "for GIF target-size mode."
+        )
+
+    # GIFs do not support bitrate control. Estimate the unconstrained output
+    # from the pixel-frame count, then reduce palette depth toward the target.
+    estimated_full_palette_mb = (
+        width * height * duration * fps * 0.20 / 1_000_000
+    )
+    target_ratio = min(
+        1.0,
+        target_size_mb / estimated_full_palette_mb,
+    )
+    palette_colors = round(2 ** (1 + 7 * target_ratio))
+
+    return max(2, min(256, palette_colors))
+
+
 def build_upscale_command(
     input_path,
     output_path,
@@ -606,6 +659,8 @@ def build_upscale_command(
     trim_start=0.0,
     trim_end=None,
     merge_audio_tracks=False,
+    output_format="mp4",
+    gif_dither="sierra2_4a",
     audio_stream_codecs=None,
 ):
     """
@@ -617,6 +672,15 @@ def build_upscale_command(
 
     input_path = Path(input_path)
     output_path = Path(output_path)
+    output_format = str(output_format).lower()
+
+    if output_format not in {"mp4", "gif", "mkv"}:
+        raise ValueError(f"Unsupported output format: {output_format}")
+
+    if output_path.suffix.lower() != f".{output_format}":
+        raise ValueError(
+            f"The output path must use the .{output_format} extension."
+        )
 
     if not input_path.is_file():
         raise FileNotFoundError(f"Input video does not exist:\n{input_path}")
@@ -630,10 +694,10 @@ def build_upscale_command(
     if width % 2 != 0 or height % 2 != 0:
         raise ValueError("Width and height must both be even numbers.")
 
-    if encoder not in SUPPORTED_ENCODERS:
+    if output_format != "gif" and encoder not in SUPPORTED_ENCODERS:
         raise ValueError(f"Unknown encoder: {encoder}")
 
-    if preset not in ENCODING_SPEEDS:
+    if output_format != "gif" and preset not in ENCODING_SPEEDS:
         raise ValueError(f"Unknown encoding speed: {preset}")
 
     if fps is not None and fps <= 0:
@@ -686,6 +750,88 @@ def build_upscale_command(
         selected_duration = (
             end_time - trim_start
         )
+
+    if output_format == "gif":
+        if rate_control == "target_size" and target_size_mb is None:
+            raise ValueError("Enter a target file size.")
+
+        gif_fps = fps if fps is not None else source_fps
+        palette_colors = calculate_gif_palette_colors(
+            quality=quality,
+            target_size_mb=(
+                target_size_mb
+                if rate_control == "target_size"
+                else None
+            ),
+            width=width,
+            height=height,
+            duration=selected_duration,
+            fps=gif_fps,
+        )
+
+        if gif_dither not in {"sierra2_4a", "bayer", "none"}:
+            raise ValueError(f"Unsupported GIF dithering mode: {gif_dither}")
+
+        input_arguments = []
+
+        if trim_start > 0:
+            input_arguments.extend(["-ss", str(trim_start)])
+
+        input_arguments.extend(["-i", str(input_path)])
+
+        if selected_duration is not None and (
+            trim_start > 0 or trim_end is not None
+        ):
+            input_arguments.extend(["-t", str(selected_duration)])
+
+        video_filters = []
+
+        if fps is not None:
+            video_filters.append(f"fps={fps}")
+
+        video_filters.extend([
+            f"scale={width}:{height}:flags=lanczos",
+            "split[gif_palette_source][gif_output_source]",
+        ])
+
+        filter_graph = (
+            "[0:v:0]"
+            + ",".join(video_filters)
+            + (
+                f";[gif_palette_source]trim=duration="
+                f"{GIF_PALETTE_SAMPLE_DURATION},"
+            )
+            + (
+                f"palettegen=max_colors={palette_colors}:"
+                "stats_mode=diff[gif_palette]"
+            )
+            + ";[gif_output_source][gif_palette]"
+            + (
+                f"paletteuse=dither={gif_dither}:"
+                "diff_mode=rectangle[gif_output]"
+            )
+        )
+
+        arguments = [
+            "-progress",
+            "pipe:1",
+            "-nostats",
+            "-hide_banner",
+            "-n",
+            *input_arguments,
+            "-filter_complex",
+            filter_graph,
+            "-map",
+            "[gif_output]",
+            "-an",
+            "-loop",
+            "0",
+            "-f",
+            "gif",
+            str(output_path),
+        ]
+
+        return ffmpeg_path, arguments
 
     video_bitrate = None
 
@@ -841,16 +987,20 @@ def build_upscale_command(
             ]
         )
 
-    arguments.extend(
-        [
-            # Make MP4 begin playback sooner when streamed
-            "-movflags",
-            "+faststart",
-        ]
-    )
+    if output_format == "mp4":
+        arguments.extend(
+            [
+                # Make MP4 begin playback sooner when streamed
+                "-movflags",
+                "+faststart",
+            ]
+        )
 
     # hvc1 improves H.265 recognition in Apple players and devices.
-    if ENCODER_PROFILES[encoder]["codec"] == "h265":
+    if (
+        output_format == "mp4"
+        and ENCODER_PROFILES[encoder]["codec"] == "h265"
+    ):
         arguments.extend(
             [
                 "-tag:v",

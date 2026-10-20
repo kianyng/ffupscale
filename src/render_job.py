@@ -41,6 +41,8 @@ class RenderJob:
     trim_start: float = 0.0
     trim_end: float | None = None
     merge_audio_tracks: bool = False
+    output_format: str = "mp4"
+    gif_dither: str = "sierra2_4a"
 
     job_id: str = field(default_factory=lambda: uuid4().hex)
     status: RenderStatus = RenderStatus.WAITING
@@ -54,6 +56,12 @@ class RenderJob:
 
         self.input_path = Path(self.input_path)
         self.output_path = Path(self.output_path)
+        self.output_format = str(self.output_format).lower()
+
+        if self.output_format not in {"mp4", "gif", "mkv"}:
+            raise ValueError(
+                f"Unsupported output format: {self.output_format}"
+            )
 
         self.source_duration = float(
             self.source_duration
@@ -131,6 +139,14 @@ class RenderJob:
             merge_audio_tracks=settings.get(
                 "merge_audio_tracks",
                 False,
+            ),
+            output_format=settings.get(
+                "output_format",
+                "mp4",
+            ),
+            gif_dither=settings.get(
+                "gif_dither",
+                "sierra2_4a",
             ),
         )
 

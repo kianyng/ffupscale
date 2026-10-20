@@ -141,10 +141,17 @@ class QueueJobRow(QFrame):
         )
 
         fps_text = "Original FPS" if job.fps is None else f"{job.fps:g} FPS"
+        format_text = job.output_format.upper()
 
-        self.details_label.setText(
-            f"{job.resolution_text} · {fps_text} · {job.encoder}"
-        )
+        if job.output_format == "gif":
+            details_text = f"{format_text} · {job.resolution_text} · {fps_text}"
+        else:
+            details_text = (
+                f"{format_text} · {job.resolution_text} · "
+                f"{fps_text} · {job.encoder}"
+            )
+
+        self.details_label.setText(details_text)
 
         status_colour = STATUS_COLOURS[job.status]
 
