@@ -1,5 +1,5 @@
 #define MyAppName "ffupscale"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "Kian Young"
 #define MyAppURL "https://github.com/kianyng/ffupscale"
 #define MyAppExeName "ffupscale.exe"
@@ -37,7 +37,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 PrivilegesRequired=admin
 
-VersionInfoVersion=1.0.1.0
+VersionInfoVersion=1.1.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=ffupscale Windows installer
 VersionInfoProductName={#MyAppName}

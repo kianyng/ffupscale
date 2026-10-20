@@ -180,7 +180,7 @@ Copy ffupscale's licence, the third-party notices and the FFmpeg legal documents
 into the portable package:
 
 ```powershell
-Copy-Item LICENSE.txt release-folder\ffupscale\ -Force
+Copy-Item LICENSE release-folder\ffupscale\ -Force
 Copy-Item THIRD_PARTY_NOTICES.md release-folder\ffupscale\ -Force
 Copy-Item licenses release-folder\ffupscale\licenses -Recurse -Force
 ```
@@ -191,7 +191,7 @@ The completed package should now resemble:
 release-folder/
 └── ffupscale/
     ├── ffupscale.exe
-    ├── LICENSE.txt
+    ├── LICENSE
     ├── THIRD_PARTY_NOTICES.md
     ├── licenses/
     │   ├── FFmpeg-BUILD-INFO.txt
@@ -249,7 +249,7 @@ The packaged FFmpeg version can be checked directly with:
 Choose the version being built:
 
 ```powershell
-$version = "1.0.1"
+$version = "1.1.0"
 ```
 
 Create the portable ZIP:
@@ -264,7 +264,7 @@ Compress-Archive `
 The resulting archive will be created in the repository root:
 
 ```text
-ffupscale-v1.0.1-windows-x64-portable.zip
+ffupscale-v1.1.0-windows-x64-portable.zip
 ```
 
 Update `$version` for each release.
@@ -311,19 +311,19 @@ Before compiling, open `installer.iss` and confirm that its application version
 matches the version being built:
 
 ```ini
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.1.0"
 ```
 
 Also update its Windows file-version value:
 
 ```ini
-VersionInfoVersion=1.0.1.0
+VersionInfoVersion=1.1.0.0
 ```
 
 The installer must use the repository's actual licence filename:
 
 ```ini
-LicenseFile=LICENSE.txt
+LicenseFile=LICENSE
 ```
 
 The installer must read the completed PyInstaller package from:
@@ -369,10 +369,10 @@ The completed installer will be created in:
 installer-output/
 ```
 
-For version 1.0.1, the expected filename is:
+For version 1.1.0, the expected filename is:
 
 ```text
-installer-output/ffupscale-v1.0.1-setup.exe
+installer-output/ffupscale-v1.1.0-setup.exe
 ```
 
 The filename is controlled by `OutputBaseFilename` inside `installer.iss`.
@@ -448,8 +448,8 @@ AppId={{ECCB0D6B-746C-4606-BC95-0986F8C1D130}
 A completed Windows build produces two distributable files:
 
 ```text
-ffupscale-v1.0.1-setup.exe
-ffupscale-v1.0.1-windows-x64-portable.zip
+ffupscale-v1.1.0-setup.exe
+ffupscale-v1.1.0-windows-x64-portable.zip
 ```
 
 The setup executable is the recommended package for normal installation.
